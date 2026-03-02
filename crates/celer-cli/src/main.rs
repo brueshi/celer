@@ -21,5 +21,6 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Compile(args) => commands::compile::execute(&args),
         Command::Run(args) => commands::run::execute(&args),
+        Command::Bench(args) => commands::bench::execute(&args),
     }
 }

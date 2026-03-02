@@ -1,0 +1,132 @@
+use std::ffi::CString;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use pyo3::prelude::*;
+
+use crate::workloads::Workload;
+
+/// Result from a single benchmark run.
+#[derive(Debug, Clone)]
+pub struct BenchResult {
+    pub workload_name: String,
+    pub runner_name: String,
+    pub iterations: u64,
+    pub total_duration: Duration,
+}
+
+impl BenchResult {
+    pub fn ops_per_sec(&self) -> f64 {
+        self.iterations as f64 / self.total_duration.as_secs_f64()
+    }
+
+    pub fn avg_ns(&self) -> f64 {
+        self.total_duration.as_nanos() as f64 / self.iterations as f64
+    }
+}
+
+pub struct BenchRunner {
+    warmup_iterations: u64,
+    bench_iterations: u64,
+}
+
+impl BenchRunner {
+    pub fn new(warmup_iterations: u64, bench_iterations: u64) -> Self {
+        Self {
+            warmup_iterations,
+            bench_iterations,
+        }
+    }
+
+    /// Run CPython benchmark for a workload.
+    pub fn run_cpython(&self, workload: &Workload) -> Result<BenchResult> {
+        let py_code = Self::build_cpython_bench_code(workload);
+        let py_code_c = CString::new(py_code)?;
+        let call_code = Self::build_cpython_call_code(workload);
+        let call_code_c = CString::new(call_code)?;
+
+        // Warmup
+        Python::with_gil(|py| -> Result<()> {
+            py.run(&py_code_c, None, None)?;
+            for _ in 0..self.warmup_iterations {
+                py.run(&call_code_c, None, None)?;
+            }
+            Ok(())
+        })?;
+
+        // Benchmark
+        let start = Instant::now();
+        Python::with_gil(|py| -> Result<()> {
+            for _ in 0..self.bench_iterations {
+                py.run(&call_code_c, None, None)?;
+            }
+            Ok(())
+        })?;
+        let duration = start.elapsed();
+
+        Ok(BenchResult {
+            workload_name: workload.name.clone(),
+            runner_name: "cpython".into(),
+            iterations: self.bench_iterations,
+            total_duration: duration,
+        })
+    }
+
+    /// Run native (Celer AOT) benchmark for a workload.
+    pub fn run_native(&self, workload: &Workload, lib_path: &Path) -> Result<BenchResult> {
+        use celer_runtime::NativeModule;
+
+        let native = unsafe { NativeModule::load(lib_path)? };
+
+        // Warmup
+        for _ in 0..self.warmup_iterations {
+            match workload.arg {
+                None => {
+                    native.call_no_args(&workload.function_name)?;
+                }
+                Some(val) => {
+                    native.call_one_int(&workload.function_name, val)?;
+                }
+            }
+        }
+
+        // Benchmark
+        let start = Instant::now();
+        for _ in 0..self.bench_iterations {
+            match workload.arg {
+                None => {
+                    native.call_no_args(&workload.function_name)?;
+                }
+                Some(val) => {
+                    native.call_one_int(&workload.function_name, val)?;
+                }
+            }
+        }
+        let duration = start.elapsed();
+
+        Ok(BenchResult {
+            workload_name: workload.name.clone(),
+            runner_name: "celer-aot".into(),
+            iterations: self.bench_iterations,
+            total_duration: duration,
+        })
+    }
+
+    fn build_cpython_bench_code(workload: &Workload) -> String {
+        format!("import json\n{}", workload.python_source.trim())
+    }
+
+    fn build_cpython_call_code(workload: &Workload) -> String {
+        match workload.arg {
+            None => format!("json.dumps({}())", workload.function_name),
+            Some(val) => format!("json.dumps({}({}))", workload.function_name, val),
+        }
+    }
+}
+
+impl Default for BenchRunner {
+    fn default() -> Self {
+        Self::new(1000, 100_000)
+    }
+}

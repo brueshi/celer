@@ -1,13 +1,9 @@
 [package]
-name = "celer-cli"
+name = "celer-bench"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "CLI binary for the Celer AOT Python compiler"
-
-[[bin]]
-name = "celerate"
-path = "src/main.rs"
+description = "Benchmark runner for Celer AOT compiler"
 
 [dependencies]
 celer-hir.workspace = true
@@ -15,11 +11,10 @@ celer-parser.workspace = true
 celer-typeinfer.workspace = true
 celer-codegen.workspace = true
 celer-runtime.workspace = true
-celer-fastapi.workspace = true
-celer-flask.workspace = true
-celer-django.workspace = true
-celer-bench.workspace = true
 inkwell.workspace = true
-clap.workspace = true
+pyo3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
 tracing.workspace = true

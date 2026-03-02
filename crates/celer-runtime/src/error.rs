@@ -13,6 +13,12 @@ pub enum RuntimeError {
 
     #[error("initialization failed: {0}")]
     InitFailed(String),
+
+    #[error("linker error: {0}")]
+    LinkerError(String),
+
+    #[error("native loading error: {0}")]
+    LoadError(String),
 }
 
 impl From<pyo3::PyErr> for RuntimeError {

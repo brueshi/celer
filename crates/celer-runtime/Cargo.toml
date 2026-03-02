@@ -10,3 +10,4 @@ celer-hir.workspace = true
 pyo3.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+libloading.workspace = true
