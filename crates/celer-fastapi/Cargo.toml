@@ -1,0 +1,11 @@
+[package]
+name = "celer-fastapi"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "FastAPI framework adapter for Celer AOT compiler"
+
+[dependencies]
+celer-hir.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

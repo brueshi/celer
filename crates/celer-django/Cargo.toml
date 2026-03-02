@@ -1,0 +1,10 @@
+[package]
+name = "celer-django"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Django framework adapter for Celer AOT compiler (Phase 2)"
+
+[dependencies]
+celer-hir.workspace = true
+thiserror.workspace = true

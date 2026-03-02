@@ -1,0 +1,10 @@
+[package]
+name = "celer-hir"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Core typed IR data structures for the Celer AOT Python compiler"
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true

@@ -1,0 +1,24 @@
+[package]
+name = "celer-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "CLI binary for the Celer AOT Python compiler"
+
+[[bin]]
+name = "celerate"
+path = "src/main.rs"
+
+[dependencies]
+celer-hir.workspace = true
+celer-parser.workspace = true
+celer-typeinfer.workspace = true
+celer-codegen.workspace = true
+celer-runtime.workspace = true
+celer-fastapi.workspace = true
+celer-flask.workspace = true
+celer-django.workspace = true
+inkwell.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

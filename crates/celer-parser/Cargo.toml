@@ -1,0 +1,12 @@
+[package]
+name = "celer-parser"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Python source to HIR conversion for Celer"
+
+[dependencies]
+celer-hir.workspace = true
+rustpython-parser.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "celer-typeinfer"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Type inference engine for Celer HIR"
+
+[dependencies]
+celer-hir.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

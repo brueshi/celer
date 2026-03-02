@@ -1,0 +1,12 @@
+[package]
+name = "celer-codegen"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "LLVM code generation for Celer HIR"
+
+[dependencies]
+celer-hir.workspace = true
+inkwell.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

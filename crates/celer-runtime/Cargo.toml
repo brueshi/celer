@@ -1,0 +1,12 @@
+[package]
+name = "celer-runtime"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "CPython bridge and runtime for Celer compiled modules"
+
+[dependencies]
+celer-hir.workspace = true
+pyo3.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
