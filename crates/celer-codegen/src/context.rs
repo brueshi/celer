@@ -1,18 +1,26 @@
 use std::collections::HashMap;
 
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::PointerValue;
 
+/// Tracks the LLVM basic blocks for break/continue inside loops.
+pub struct LoopContext<'ctx> {
+    pub cond_bb: BasicBlock<'ctx>,
+    pub exit_bb: BasicBlock<'ctx>,
+}
+
 /// Wraps LLVM context, module, and builder for code generation.
-/// Tracks local variables and a string constant pool.
+/// Tracks local variables, a string constant pool, and loop stack.
 pub struct CodegenContext<'ctx> {
     pub context: &'ctx Context,
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     locals: HashMap<String, PointerValue<'ctx>>,
     string_counter: u32,
+    loop_stack: Vec<LoopContext<'ctx>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -25,6 +33,7 @@ impl<'ctx> CodegenContext<'ctx> {
             builder,
             locals: HashMap::new(),
             string_counter: 0,
+            loop_stack: Vec::new(),
         }
     }
 
@@ -46,6 +55,18 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Clear local variable bindings (between functions).
     pub fn clear_locals(&mut self) {
         self.locals.clear();
+    }
+
+    pub fn push_loop(&mut self, cond_bb: BasicBlock<'ctx>, exit_bb: BasicBlock<'ctx>) {
+        self.loop_stack.push(LoopContext { cond_bb, exit_bb });
+    }
+
+    pub fn pop_loop(&mut self) {
+        self.loop_stack.pop();
+    }
+
+    pub fn current_loop(&self) -> Option<&LoopContext<'ctx>> {
+        self.loop_stack.last()
     }
 
     /// Add a global string constant and return a pointer to it.

@@ -4,7 +4,7 @@ use crate::convert_decorator::decorator_to_string;
 use crate::convert_expr::convert_expr;
 use crate::convert_type::convert_annotation;
 use crate::error::ParseError;
-use celer_hir::{Function, Parameter, Statement, TypeAnnotation};
+use celer_hir::{Expression, Function, Parameter, Statement, TypeAnnotation};
 
 /// Convert a rustpython-parser statement AST node to a HIR Statement.
 pub fn convert_stmt(stmt: &ast::Stmt) -> Result<Statement, ParseError> {
@@ -25,6 +25,8 @@ pub fn convert_stmt(stmt: &ast::Stmt) -> Result<Statement, ParseError> {
         ast::Stmt::If(i) => convert_if(i),
         ast::Stmt::While(w) => convert_while(w),
         ast::Stmt::For(f) => convert_for(f),
+        ast::Stmt::ClassDef(c) => convert_class_def(c),
+        ast::Stmt::AnnAssign(a) => convert_ann_assign(a),
         ast::Stmt::Raise(r) => convert_raise(r),
         ast::Stmt::Assert(a) => convert_assert(a),
         _ => Err(ParseError::UnsupportedFeature(format!(
@@ -117,6 +119,82 @@ fn convert_arg_with_default(awd: &ast::ArgWithDefault) -> Result<Parameter, Pars
         name,
         annotation,
         default,
+    })
+}
+
+fn convert_class_def(c: &ast::StmtClassDef) -> Result<Statement, ParseError> {
+    let name = c.name.to_string();
+
+    let bases: Vec<String> = c
+        .bases
+        .iter()
+        .filter_map(|base| match base {
+            ast::Expr::Name(n) => Some(n.id.to_string()),
+            ast::Expr::Attribute(a) => Some(format!("{}.{}", expr_to_dotted(&a.value), a.attr)),
+            _ => None,
+        })
+        .collect();
+
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+
+    for stmt in &c.body {
+        match stmt {
+            ast::Stmt::AnnAssign(ann) => {
+                if let ast::Expr::Name(n) = &*ann.target {
+                    let field_name = n.id.to_string();
+                    let field_type = convert_annotation(&ann.annotation)?;
+                    fields.push((field_name, field_type));
+                }
+            }
+            ast::Stmt::FunctionDef(f) => {
+                if let Ok(Statement::FunctionDef(func)) = convert_function_def(f, false) {
+                    methods.push(func);
+                }
+            }
+            ast::Stmt::AsyncFunctionDef(f) => {
+                if let Ok(Statement::FunctionDef(func)) = convert_async_function_def(f) {
+                    methods.push(func);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Statement::ClassDef {
+        name,
+        bases,
+        methods,
+        fields,
+    })
+}
+
+fn expr_to_dotted(expr: &ast::Expr) -> String {
+    match expr {
+        ast::Expr::Name(n) => n.id.to_string(),
+        ast::Expr::Attribute(a) => format!("{}.{}", expr_to_dotted(&a.value), a.attr),
+        _ => "<unknown>".to_string(),
+    }
+}
+
+fn convert_ann_assign(a: &ast::StmtAnnAssign) -> Result<Statement, ParseError> {
+    let target_name = match &*a.target {
+        ast::Expr::Name(n) => n.id.to_string(),
+        _ => {
+            return Err(ParseError::UnsupportedFeature(
+                "non-name annotated assignment target".into(),
+            ))
+        }
+    };
+    let annotation = convert_annotation(&a.annotation)?;
+    let value = match &a.value {
+        Some(expr) => convert_expr(expr)?,
+        None => Expression::NoneLiteral,
+    };
+    Ok(Statement::Assign {
+        target: target_name,
+        annotation: Some(annotation),
+        value,
     })
 }
 
@@ -403,6 +481,95 @@ def get_item(item_id: int) -> dict:
                 assert_eq!(f.decorators[0], "app.get(\"/items/{item_id}\")");
             }
             _ => panic!("expected get_item FunctionDef"),
+        }
+    }
+
+    // -- Phase 2b: ClassDef parsing tests --
+
+    #[test]
+    fn class_def_basic() {
+        let stmts = parse_stmts("class User:\n    name: str\n    age: int\n");
+        let hir = convert_stmt(&stmts[0]).unwrap();
+        match hir {
+            Statement::ClassDef { name, fields, .. } => {
+                assert_eq!(name, "User");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "name");
+                assert_eq!(fields[0].1, TypeAnnotation::Str);
+                assert_eq!(fields[1].0, "age");
+                assert_eq!(fields[1].1, TypeAnnotation::Int);
+            }
+            _ => panic!("expected ClassDef"),
+        }
+    }
+
+    #[test]
+    fn class_def_with_base() {
+        let stmts = parse_stmts("class User(BaseModel):\n    name: str\n");
+        let hir = convert_stmt(&stmts[0]).unwrap();
+        match hir {
+            Statement::ClassDef {
+                name,
+                bases,
+                fields,
+                ..
+            } => {
+                assert_eq!(name, "User");
+                assert_eq!(bases, vec!["BaseModel"]);
+                assert_eq!(fields.len(), 1);
+            }
+            _ => panic!("expected ClassDef"),
+        }
+    }
+
+    #[test]
+    fn class_def_with_method() {
+        let stmts =
+            parse_stmts("class Greeter:\n    def greet(self) -> str:\n        return \"hello\"\n");
+        let hir = convert_stmt(&stmts[0]).unwrap();
+        match hir {
+            Statement::ClassDef { name, methods, .. } => {
+                assert_eq!(name, "Greeter");
+                assert_eq!(methods.len(), 1);
+                assert_eq!(methods[0].name, "greet");
+            }
+            _ => panic!("expected ClassDef"),
+        }
+    }
+
+    #[test]
+    fn ann_assign_with_value() {
+        let stmts = parse_stmts("x: int = 42\n");
+        let hir = convert_stmt(&stmts[0]).unwrap();
+        match hir {
+            Statement::Assign {
+                target,
+                annotation,
+                value,
+            } => {
+                assert_eq!(target, "x");
+                assert_eq!(annotation, Some(TypeAnnotation::Int));
+                assert_eq!(value, celer_hir::Expression::IntLiteral(42));
+            }
+            _ => panic!("expected Assign from AnnAssign"),
+        }
+    }
+
+    #[test]
+    fn ann_assign_without_value() {
+        let stmts = parse_stmts("x: int\n");
+        let hir = convert_stmt(&stmts[0]).unwrap();
+        match hir {
+            Statement::Assign {
+                target,
+                annotation,
+                value,
+            } => {
+                assert_eq!(target, "x");
+                assert_eq!(annotation, Some(TypeAnnotation::Int));
+                assert_eq!(value, celer_hir::Expression::NoneLiteral);
+            }
+            _ => panic!("expected Assign from AnnAssign"),
         }
     }
 }

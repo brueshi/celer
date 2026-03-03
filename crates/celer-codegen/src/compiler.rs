@@ -91,7 +91,8 @@ impl<'ctx> Compiler<'ctx> {
 mod tests {
     use super::*;
     use celer_hir::{
-        Expression, Function, Module as HirModule, Parameter, Statement, TypeAnnotation,
+        BinaryOp, Expression, Function, Module as HirModule, Parameter, Statement, TypeAnnotation,
+        UnaryOp,
     };
 
     fn make_module(stmts: Vec<Statement>) -> HirModule {
@@ -246,6 +247,363 @@ mod tests {
         let module = make_module(vec![]);
         let context = Context::create();
         let mut compiler = Compiler::new(&context, "empty");
+        compiler.compile_module(&module).unwrap();
+        compiler.verify().unwrap();
+    }
+
+    // -- Phase 2a tests: binary ops, control flow --
+
+    #[test]
+    fn binary_add_int() {
+        // def add(a: int, b: int) -> int:
+        //     return a + b
+        let func = Function {
+            name: "add".into(),
+            params: vec![
+                Parameter {
+                    name: "a".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                },
+                Parameter {
+                    name: "b".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                },
+            ],
+            return_type: TypeAnnotation::Int,
+            body: vec![Statement::Return {
+                value: Some(Expression::BinaryOp {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expression::Name {
+                        id: "a".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                    right: Box::new(Expression::Name {
+                        id: "b".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                    ty: TypeAnnotation::Int,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("add"), "IR should contain add instruction");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn unary_neg_int() {
+        // def negate(x: int) -> int:
+        //     return -x
+        let func = Function {
+            name: "negate".into(),
+            params: vec![Parameter {
+                name: "x".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![Statement::Return {
+                value: Some(Expression::UnaryOp {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(Expression::Name {
+                        id: "x".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                    ty: TypeAnnotation::Int,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn if_else_branching() {
+        // def max_val(a: int, b: int) -> int:
+        //     if a > b:
+        //         return a
+        //     else:
+        //         return b
+        let func = Function {
+            name: "max_val".into(),
+            params: vec![
+                Parameter {
+                    name: "a".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                },
+                Parameter {
+                    name: "b".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                },
+            ],
+            return_type: TypeAnnotation::Int,
+            body: vec![Statement::If {
+                test: Expression::BinaryOp {
+                    op: BinaryOp::Gt,
+                    left: Box::new(Expression::Name {
+                        id: "a".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                    right: Box::new(Expression::Name {
+                        id: "b".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                    ty: TypeAnnotation::Bool,
+                },
+                body: vec![Statement::Return {
+                    value: Some(Expression::Name {
+                        id: "a".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                }],
+                orelse: vec![Statement::Return {
+                    value: Some(Expression::Name {
+                        id: "b".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                }],
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("then"), "IR should contain then block");
+        assert!(ir.contains("else"), "IR should contain else block");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn while_loop_fibonacci() {
+        // def fib(n: int) -> int:
+        //     a = 0
+        //     b = 1
+        //     i = 0
+        //     while i < n:
+        //         t = a + b
+        //         a = b
+        //         b = t
+        //         i = i + 1
+        //     return a
+        let func = Function {
+            name: "fib".into(),
+            params: vec![Parameter {
+                name: "n".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![
+                Statement::Assign {
+                    target: "a".into(),
+                    annotation: None,
+                    value: Expression::IntLiteral(0),
+                },
+                Statement::Assign {
+                    target: "b".into(),
+                    annotation: None,
+                    value: Expression::IntLiteral(1),
+                },
+                Statement::Assign {
+                    target: "i".into(),
+                    annotation: None,
+                    value: Expression::IntLiteral(0),
+                },
+                Statement::While {
+                    test: Expression::BinaryOp {
+                        op: BinaryOp::Lt,
+                        left: Box::new(Expression::Name {
+                            id: "i".into(),
+                            ty: TypeAnnotation::Int,
+                        }),
+                        right: Box::new(Expression::Name {
+                            id: "n".into(),
+                            ty: TypeAnnotation::Int,
+                        }),
+                        ty: TypeAnnotation::Bool,
+                    },
+                    body: vec![
+                        Statement::Assign {
+                            target: "t".into(),
+                            annotation: None,
+                            value: Expression::BinaryOp {
+                                op: BinaryOp::Add,
+                                left: Box::new(Expression::Name {
+                                    id: "a".into(),
+                                    ty: TypeAnnotation::Int,
+                                }),
+                                right: Box::new(Expression::Name {
+                                    id: "b".into(),
+                                    ty: TypeAnnotation::Int,
+                                }),
+                                ty: TypeAnnotation::Int,
+                            },
+                        },
+                        Statement::Assign {
+                            target: "a".into(),
+                            annotation: None,
+                            value: Expression::Name {
+                                id: "b".into(),
+                                ty: TypeAnnotation::Int,
+                            },
+                        },
+                        Statement::Assign {
+                            target: "b".into(),
+                            annotation: None,
+                            value: Expression::Name {
+                                id: "t".into(),
+                                ty: TypeAnnotation::Int,
+                            },
+                        },
+                        Statement::AugAssign {
+                            target: "i".into(),
+                            op: BinaryOp::Add,
+                            value: Expression::IntLiteral(1),
+                        },
+                    ],
+                },
+                Statement::Return {
+                    value: Some(Expression::Name {
+                        id: "a".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                },
+            ],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("while.cond"), "IR should contain while.cond");
+        assert!(ir.contains("while.body"), "IR should contain while.body");
+        assert!(ir.contains("while.exit"), "IR should contain while.exit");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn for_loop_range() {
+        // def sum_n(n: int) -> int:
+        //     total = 0
+        //     for i in range(n):
+        //         total = total + i
+        //     return total
+        let func = Function {
+            name: "sum_n".into(),
+            params: vec![Parameter {
+                name: "n".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![
+                Statement::Assign {
+                    target: "total".into(),
+                    annotation: None,
+                    value: Expression::IntLiteral(0),
+                },
+                Statement::For {
+                    target: "i".into(),
+                    iter: Expression::Call {
+                        func: Box::new(Expression::Name {
+                            id: "range".into(),
+                            ty: TypeAnnotation::Unknown,
+                        }),
+                        args: vec![Expression::Name {
+                            id: "n".into(),
+                            ty: TypeAnnotation::Int,
+                        }],
+                        ty: TypeAnnotation::Unknown,
+                    },
+                    body: vec![Statement::AugAssign {
+                        target: "total".into(),
+                        op: BinaryOp::Add,
+                        value: Expression::Name {
+                            id: "i".into(),
+                            ty: TypeAnnotation::Int,
+                        },
+                    }],
+                },
+                Statement::Return {
+                    value: Some(Expression::Name {
+                        id: "total".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                },
+            ],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("for.cond"), "IR should contain for.cond");
+        assert!(ir.contains("for.body"), "IR should contain for.body");
+        assert!(ir.contains("for.exit"), "IR should contain for.exit");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn comparison_ops() {
+        // def is_positive(x: int) -> bool:
+        //     return x > 0
+        let func = Function {
+            name: "is_positive".into(),
+            params: vec![Parameter {
+                name: "x".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Bool,
+            body: vec![Statement::Return {
+                value: Some(Expression::BinaryOp {
+                    op: BinaryOp::Gt,
+                    left: Box::new(Expression::Name {
+                        id: "x".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                    right: Box::new(Expression::IntLiteral(0)),
+                    ty: TypeAnnotation::Bool,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
         compiler.compile_module(&module).unwrap();
         compiler.verify().unwrap();
     }

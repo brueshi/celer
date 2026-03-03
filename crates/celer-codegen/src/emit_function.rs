@@ -5,8 +5,8 @@ use inkwell::values::FunctionValue;
 use celer_hir::{Expression, Function, Statement};
 
 use crate::context::CodegenContext;
-use crate::emit_expr::emit_expression;
 use crate::emit_json::{ArgFormat, JsonPlan, plan_dict};
+use crate::emit_stmt::emit_statement;
 use crate::error::CodegenError;
 use crate::types::{is_json_return_type, resolve_type};
 
@@ -45,7 +45,7 @@ pub fn emit_function<'ctx>(
             ctx.set_local(&param.name, alloca);
         }
 
-        // Emit body statements (Assign, etc.) up to the return
+        // Emit body statements up to the return
         let mut return_expr: Option<&Expression> = None;
         for stmt in &func.body {
             match stmt {
@@ -53,10 +53,9 @@ pub fn emit_function<'ctx>(
                     return_expr = Some(expr);
                     break;
                 }
-                Statement::Assign { target, value, .. } => {
-                    emit_assign(ctx, target, value)?;
+                other => {
+                    emit_statement(ctx, fn_val, other)?;
                 }
-                _ => {}
             }
         }
 
@@ -97,12 +96,33 @@ pub fn emit_function<'ctx>(
             emit_statement(ctx, fn_val, stmt)?;
         }
 
-        // If no terminator yet, add void return
+        // If no terminator yet, add a default return or unreachable
         let current_bb = ctx.builder.get_insert_block().unwrap();
         if current_bb.get_terminator().is_none() {
-            ctx.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let ret_type = resolve_type(ctx.context, &func.return_type)?;
+            match ret_type {
+                Some(ty) => {
+                    use inkwell::values::BasicValueEnum;
+                    let default_val: BasicValueEnum<'ctx> = match ty {
+                        inkwell::types::BasicTypeEnum::IntType(t) => t.const_zero().into(),
+                        inkwell::types::BasicTypeEnum::FloatType(t) => t.const_zero().into(),
+                        _ => {
+                            ctx.builder
+                                .build_unreachable()
+                                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                            return Ok(fn_val);
+                        }
+                    };
+                    ctx.builder
+                        .build_return(Some(&default_val))
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                }
+                None => {
+                    ctx.builder
+                        .build_return(None)
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                }
+            }
         }
     }
 
@@ -321,54 +341,3 @@ fn emit_snprintf_json<'ctx>(
     Ok(())
 }
 
-fn emit_statement<'ctx>(
-    ctx: &mut CodegenContext<'ctx>,
-    _fn_val: FunctionValue<'ctx>,
-    stmt: &Statement,
-) -> Result<(), CodegenError> {
-    match stmt {
-        Statement::Return { value: Some(expr) } => {
-            let val = emit_expression(ctx, expr)?;
-            ctx.builder
-                .build_return(Some(&val))
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        }
-        Statement::Return { value: None } => {
-            ctx.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        }
-        Statement::Assign { target, value, .. } => {
-            emit_assign(ctx, target, value)?;
-        }
-        Statement::Expr(_) => {
-            // Side-effect expression; ignore result for now
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn emit_assign<'ctx>(
-    ctx: &mut CodegenContext<'ctx>,
-    target: &str,
-    value: &Expression,
-) -> Result<(), CodegenError> {
-    let val = emit_expression(ctx, value)?;
-    // If variable already exists, store into it; otherwise alloca
-    let ptr = match ctx.get_local(target) {
-        Some(existing) => existing,
-        None => {
-            let alloca = ctx
-                .builder
-                .build_alloca(val.get_type(), target)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.set_local(target, alloca);
-            alloca
-        }
-    };
-    ctx.builder
-        .build_store(ptr, val)
-        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-    Ok(())
-}

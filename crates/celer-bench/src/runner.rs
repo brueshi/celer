@@ -75,42 +75,62 @@ impl BenchRunner {
 
     /// Run native (Celer AOT) benchmark for a workload.
     pub fn run_native(&self, workload: &Workload, lib_path: &Path) -> Result<BenchResult> {
-        use celer_runtime::NativeModule;
+        use crate::workloads::ReturnKind;
+        use celer_runtime::{NativeModule, Value};
 
         let native = unsafe { NativeModule::load(lib_path)? };
 
-        // Warmup
-        for _ in 0..self.warmup_iterations {
-            match workload.arg {
-                None => {
-                    native.call_no_args(&workload.function_name)?;
+        let args: Vec<Value> = match workload.arg {
+            None => vec![],
+            Some(val) => vec![Value::I64(val)],
+        };
+
+        // Select dispatch strategy based on return kind to avoid
+        // the overhead of try-json-then-scalar fallback per iteration.
+        match workload.return_kind {
+            ReturnKind::Json => {
+                // Warmup
+                for _ in 0..self.warmup_iterations {
+                    match workload.arg {
+                        None => { native.call_no_args(&workload.function_name)?; }
+                        Some(val) => { native.call_one_int(&workload.function_name, val)?; }
+                    }
                 }
-                Some(val) => {
-                    native.call_one_int(&workload.function_name, val)?;
+                // Benchmark
+                let start = Instant::now();
+                for _ in 0..self.bench_iterations {
+                    match workload.arg {
+                        None => { native.call_no_args(&workload.function_name)?; }
+                        Some(val) => { native.call_one_int(&workload.function_name, val)?; }
+                    }
                 }
+                let duration = start.elapsed();
+                Ok(BenchResult {
+                    workload_name: workload.name.clone(),
+                    runner_name: "celer-aot".into(),
+                    iterations: self.bench_iterations,
+                    total_duration: duration,
+                })
+            }
+            ReturnKind::ScalarI64 => {
+                // Warmup
+                for _ in 0..self.warmup_iterations {
+                    native.call(&workload.function_name, &args)?;
+                }
+                // Benchmark
+                let start = Instant::now();
+                for _ in 0..self.bench_iterations {
+                    native.call(&workload.function_name, &args)?;
+                }
+                let duration = start.elapsed();
+                Ok(BenchResult {
+                    workload_name: workload.name.clone(),
+                    runner_name: "celer-aot".into(),
+                    iterations: self.bench_iterations,
+                    total_duration: duration,
+                })
             }
         }
-
-        // Benchmark
-        let start = Instant::now();
-        for _ in 0..self.bench_iterations {
-            match workload.arg {
-                None => {
-                    native.call_no_args(&workload.function_name)?;
-                }
-                Some(val) => {
-                    native.call_one_int(&workload.function_name, val)?;
-                }
-            }
-        }
-        let duration = start.elapsed();
-
-        Ok(BenchResult {
-            workload_name: workload.name.clone(),
-            runner_name: "celer-aot".into(),
-            iterations: self.bench_iterations,
-            total_duration: duration,
-        })
     }
 
     fn build_cpython_bench_code(workload: &Workload) -> String {
@@ -118,9 +138,16 @@ impl BenchRunner {
     }
 
     fn build_cpython_call_code(workload: &Workload) -> String {
-        match workload.arg {
-            None => format!("json.dumps({}())", workload.function_name),
-            Some(val) => format!("json.dumps({}({}))", workload.function_name, val),
+        use crate::workloads::ReturnKind;
+        match (&workload.return_kind, workload.arg) {
+            (ReturnKind::Json, None) => format!("json.dumps({}())", workload.function_name),
+            (ReturnKind::Json, Some(val)) => {
+                format!("json.dumps({}({}))", workload.function_name, val)
+            }
+            (ReturnKind::ScalarI64, None) => format!("{}()", workload.function_name),
+            (ReturnKind::ScalarI64, Some(val)) => {
+                format!("{}({})", workload.function_name, val)
+            }
         }
     }
 }

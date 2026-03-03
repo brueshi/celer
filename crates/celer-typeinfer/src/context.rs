@@ -2,12 +2,14 @@ use std::collections::HashMap;
 
 use celer_hir::TypeAnnotation;
 
+use crate::classes::ClassRegistry;
 use crate::functions::{FunctionRegistry, FunctionSignature};
 
 /// Scoped symbol table for tracking variable types during inference.
 pub struct TypeContext {
     scopes: Vec<HashMap<String, TypeAnnotation>>,
     functions: FunctionRegistry,
+    classes: ClassRegistry,
 }
 
 impl TypeContext {
@@ -15,6 +17,7 @@ impl TypeContext {
         Self {
             scopes: vec![HashMap::new()],
             functions: FunctionRegistry::new(),
+            classes: ClassRegistry::new(),
         }
     }
 
@@ -24,6 +27,18 @@ impl TypeContext {
 
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSignature> {
         self.functions.lookup(name)
+    }
+
+    pub fn define_class(&mut self, class: celer_hir::ClassDef) {
+        self.classes.register(class);
+    }
+
+    pub fn lookup_class(&self, name: &str) -> Option<&celer_hir::ClassDef> {
+        self.classes.lookup(name)
+    }
+
+    pub fn class_field_type(&self, class_name: &str, field: &str) -> Option<&TypeAnnotation> {
+        self.classes.field_type(class_name, field)
     }
 
     pub fn push_scope(&mut self) {

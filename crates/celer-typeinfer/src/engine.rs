@@ -1,8 +1,66 @@
-use celer_hir::{Expression, Module, Statement, TypeAnnotation};
+use celer_hir::{BinaryOp, Expression, Module, Statement, TypeAnnotation, UnaryOp};
 
 use crate::context::TypeContext;
 use crate::error::TypeError;
 use crate::functions::FunctionSignature;
+
+fn resolve_binary_op_type(
+    op: &BinaryOp,
+    left: &TypeAnnotation,
+    right: &TypeAnnotation,
+) -> Result<TypeAnnotation, TypeError> {
+    use BinaryOp::*;
+    match op {
+        Add | Sub | Mul | Mod | FloorDiv | Pow => match (left, right) {
+            (TypeAnnotation::Int, TypeAnnotation::Int) => Ok(TypeAnnotation::Int),
+            (TypeAnnotation::Float, TypeAnnotation::Float)
+            | (TypeAnnotation::Int, TypeAnnotation::Float)
+            | (TypeAnnotation::Float, TypeAnnotation::Int) => Ok(TypeAnnotation::Float),
+            (TypeAnnotation::Str, TypeAnnotation::Str) if matches!(op, Add) => {
+                Ok(TypeAnnotation::Str)
+            }
+            _ => Err(TypeError::BinaryOpMismatch {
+                op: format!("{op:?}"),
+                left: format!("{left:?}"),
+                right: format!("{right:?}"),
+            }),
+        },
+        Div => Ok(TypeAnnotation::Float),
+        Eq | NotEq | Lt | LtEq | Gt | GtEq => Ok(TypeAnnotation::Bool),
+        And | Or => Ok(TypeAnnotation::Bool),
+        BitAnd | BitOr | BitXor | LShift | RShift => match (left, right) {
+            (TypeAnnotation::Int, TypeAnnotation::Int) => Ok(TypeAnnotation::Int),
+            _ => Err(TypeError::BinaryOpMismatch {
+                op: format!("{op:?}"),
+                left: format!("{left:?}"),
+                right: format!("{right:?}"),
+            }),
+        },
+    }
+}
+
+fn resolve_unary_op_type(
+    op: &UnaryOp,
+    operand: &TypeAnnotation,
+) -> Result<TypeAnnotation, TypeError> {
+    use UnaryOp::*;
+    match op {
+        Neg | Pos => match operand {
+            TypeAnnotation::Int => Ok(TypeAnnotation::Int),
+            TypeAnnotation::Float => Ok(TypeAnnotation::Float),
+            _ => Err(TypeError::InferenceFailure(format!(
+                "cannot negate {operand:?}"
+            ))),
+        },
+        Not => Ok(TypeAnnotation::Bool),
+        BitNot => match operand {
+            TypeAnnotation::Int => Ok(TypeAnnotation::Int),
+            _ => Err(TypeError::InferenceFailure(format!(
+                "cannot bitwise-not {operand:?}"
+            ))),
+        },
+    }
+}
 
 /// Walks a HIR module and resolves Unknown types where possible.
 pub struct InferenceEngine {
@@ -151,9 +209,43 @@ impl InferenceEngine {
                 }
                 Ok(())
             }
+            Statement::ClassDef {
+                name,
+                bases,
+                methods,
+                fields,
+            } => {
+                let class_def = celer_hir::ClassDef {
+                    name: name.clone(),
+                    bases: bases.clone(),
+                    fields: fields.clone(),
+                    methods: methods.iter().map(|m| m.name.clone()).collect(),
+                };
+                self.ctx.define_class(class_def);
+                self.ctx
+                    .define(name.clone(), TypeAnnotation::Class(name.clone()));
+
+                // Infer method bodies in a scoped context
+                for method in methods {
+                    self.ctx.push_scope();
+                    for p in &method.params {
+                        if p.name == "self" {
+                            self.ctx
+                                .define(p.name.clone(), TypeAnnotation::Class(name.clone()));
+                        } else {
+                            self.ctx.define(p.name.clone(), p.annotation.clone());
+                        }
+                    }
+                    for s in &mut method.body.clone() {
+                        let _ = self.infer_statement(&mut s.clone());
+                    }
+                    self.ctx.pop_scope();
+                }
+
+                Ok(())
+            }
             // Statements that don't carry type information yet
-            Statement::ClassDef { .. }
-            | Statement::Import { .. }
+            Statement::Import { .. }
             | Statement::ImportFrom { .. }
             | Statement::Pass
             | Statement::Break
@@ -206,12 +298,21 @@ impl InferenceEngine {
                 *ty = resolved.clone();
                 Ok(resolved)
             }
-            Expression::Call { func, ty, .. } => {
+            Expression::Call { func, args, ty } => {
                 if *ty != TypeAnnotation::Unknown {
                     return Ok(ty.clone());
                 }
-                // Try to resolve from function registry via the callee name
-                if let Expression::Name { id, .. } = func.as_ref() {
+                for arg in args.iter_mut() {
+                    self.infer_expression(arg)?;
+                }
+                if let Expression::Name { id, .. } = func.as_mut() {
+                    // Check if this is a class constructor call
+                    if self.ctx.lookup_class(id).is_some() {
+                        let resolved = TypeAnnotation::Class(id.clone());
+                        *ty = resolved.clone();
+                        return Ok(resolved);
+                    }
+                    // Check function registry
                     if let Some(sig) = self.ctx.lookup_function(id) {
                         let resolved = sig.return_type.clone();
                         *ty = resolved.clone();
@@ -224,6 +325,82 @@ impl InferenceEngine {
                     }
                 }
                 Ok(TypeAnnotation::Unknown)
+            }
+            Expression::BinaryOp {
+                op,
+                left,
+                right,
+                ty,
+            } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let left_ty = self.infer_expression(left)?;
+                let right_ty = self.infer_expression(right)?;
+                let resolved = resolve_binary_op_type(op, &left_ty, &right_ty)?;
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
+            Expression::UnaryOp { op, operand, ty } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let operand_ty = self.infer_expression(operand)?;
+                let resolved = resolve_unary_op_type(op, &operand_ty)?;
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
+            Expression::IfExpr {
+                test,
+                body,
+                orelse,
+                ty,
+            } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                self.infer_expression(test)?;
+                let body_ty = self.infer_expression(body)?;
+                let else_ty = self.infer_expression(orelse)?;
+                let resolved = if body_ty == else_ty {
+                    body_ty
+                } else {
+                    TypeAnnotation::Any
+                };
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
+            Expression::Attribute { value, attr, ty } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let val_ty = self.infer_expression(value)?;
+                let resolved = match &val_ty {
+                    TypeAnnotation::Class(class_name) => self
+                        .ctx
+                        .class_field_type(class_name, attr)
+                        .cloned()
+                        .unwrap_or(TypeAnnotation::Unknown),
+                    _ => TypeAnnotation::Unknown,
+                };
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
+            Expression::Subscript {
+                value, index, ty, ..
+            } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let val_ty = self.infer_expression(value)?;
+                self.infer_expression(index)?;
+                let resolved = match val_ty {
+                    TypeAnnotation::List(inner) => *inner,
+                    TypeAnnotation::Dict(_, v) => *v,
+                    _ => TypeAnnotation::Unknown,
+                };
+                *ty = resolved.clone();
+                Ok(resolved)
             }
             _ => Ok(expr.ty().clone()),
         }
@@ -658,5 +835,330 @@ mod tests {
         let sig = engine.ctx.lookup_function("add").unwrap();
         assert_eq!(sig.return_type, TypeAnnotation::Int);
         assert_eq!(sig.params.len(), 2);
+    }
+
+    // -- Phase 2a: BinaryOp / UnaryOp inference tests --
+
+    #[test]
+    fn infer_binary_int_add() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::BinaryOp {
+                op: celer_hir::BinaryOp::Add,
+                left: Box::new(Expression::IntLiteral(1)),
+                right: Box::new(Expression::IntLiteral(2)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Int));
+    }
+
+    #[test]
+    fn infer_binary_int_float_yields_float() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::BinaryOp {
+                op: celer_hir::BinaryOp::Mul,
+                left: Box::new(Expression::IntLiteral(3)),
+                right: Box::new(Expression::FloatLiteral(2.0)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Float));
+    }
+
+    #[test]
+    fn infer_binary_div_always_float() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::BinaryOp {
+                op: celer_hir::BinaryOp::Div,
+                left: Box::new(Expression::IntLiteral(10)),
+                right: Box::new(Expression::IntLiteral(3)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Float));
+    }
+
+    #[test]
+    fn infer_comparison_yields_bool() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::BinaryOp {
+                op: celer_hir::BinaryOp::Lt,
+                left: Box::new(Expression::IntLiteral(1)),
+                right: Box::new(Expression::IntLiteral(2)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Bool));
+    }
+
+    #[test]
+    fn infer_unary_neg_preserves_type() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "a".into(),
+            annotation: None,
+            value: Expression::UnaryOp {
+                op: celer_hir::UnaryOp::Neg,
+                operand: Box::new(Expression::IntLiteral(5)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+        module.body.push(Statement::Assign {
+            target: "b".into(),
+            annotation: None,
+            value: Expression::UnaryOp {
+                op: celer_hir::UnaryOp::Neg,
+                operand: Box::new(Expression::FloatLiteral(3.14)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("a"), Some(&TypeAnnotation::Int));
+        assert_eq!(engine.ctx.lookup("b"), Some(&TypeAnnotation::Float));
+    }
+
+    #[test]
+    fn infer_unary_not_yields_bool() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::UnaryOp {
+                op: celer_hir::UnaryOp::Not,
+                operand: Box::new(Expression::BoolLiteral(true)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Bool));
+    }
+
+    #[test]
+    fn infer_bitwise_on_ints() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::BinaryOp {
+                op: celer_hir::BinaryOp::BitAnd,
+                left: Box::new(Expression::IntLiteral(0xFF)),
+                right: Box::new(Expression::IntLiteral(0x0F)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Int));
+    }
+
+    #[test]
+    fn infer_string_concat() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::BinaryOp {
+                op: celer_hir::BinaryOp::Add,
+                left: Box::new(Expression::StringLiteral("hello".into())),
+                right: Box::new(Expression::StringLiteral(" world".into())),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Str));
+    }
+
+    #[test]
+    fn infer_if_expr() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::Assign {
+            target: "r".into(),
+            annotation: None,
+            value: Expression::IfExpr {
+                test: Box::new(Expression::BoolLiteral(true)),
+                body: Box::new(Expression::IntLiteral(1)),
+                orelse: Box::new(Expression::IntLiteral(2)),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("r"), Some(&TypeAnnotation::Int));
+    }
+
+    // -- Phase 2b: ClassDef / Attribute / Constructor tests --
+
+    #[test]
+    fn infer_class_def_registers_class() {
+        let mut module = Module::new("test", "test.py");
+        module.body.push(Statement::ClassDef {
+            name: "User".into(),
+            bases: vec!["BaseModel".into()],
+            fields: vec![
+                ("name".into(), TypeAnnotation::Str),
+                ("age".into(), TypeAnnotation::Int),
+            ],
+            methods: vec![],
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+
+        assert_eq!(
+            engine.ctx.lookup("User"),
+            Some(&TypeAnnotation::Class("User".into()))
+        );
+        assert!(engine.ctx.lookup_class("User").is_some());
+    }
+
+    #[test]
+    fn infer_class_constructor_call() {
+        let mut module = Module::new("test", "test.py");
+
+        module.body.push(Statement::ClassDef {
+            name: "User".into(),
+            bases: vec!["BaseModel".into()],
+            fields: vec![("name".into(), TypeAnnotation::Str)],
+            methods: vec![],
+        });
+
+        module.body.push(Statement::Assign {
+            target: "u".into(),
+            annotation: None,
+            value: Expression::Call {
+                func: Box::new(Expression::Name {
+                    id: "User".into(),
+                    ty: TypeAnnotation::Unknown,
+                }),
+                args: vec![Expression::StringLiteral("alice".into())],
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(
+            engine.ctx.lookup("u"),
+            Some(&TypeAnnotation::Class("User".into()))
+        );
+    }
+
+    #[test]
+    fn infer_attribute_access_on_class() {
+        let mut module = Module::new("test", "test.py");
+
+        module.body.push(Statement::ClassDef {
+            name: "Item".into(),
+            bases: vec![],
+            fields: vec![
+                ("price".into(), TypeAnnotation::Float),
+                ("name".into(), TypeAnnotation::Str),
+            ],
+            methods: vec![],
+        });
+
+        module.body.push(Statement::Assign {
+            target: "item".into(),
+            annotation: None,
+            value: Expression::Call {
+                func: Box::new(Expression::Name {
+                    id: "Item".into(),
+                    ty: TypeAnnotation::Unknown,
+                }),
+                args: vec![],
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        module.body.push(Statement::Assign {
+            target: "p".into(),
+            annotation: None,
+            value: Expression::Attribute {
+                value: Box::new(Expression::Name {
+                    id: "item".into(),
+                    ty: TypeAnnotation::Unknown,
+                }),
+                attr: "price".into(),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("p"), Some(&TypeAnnotation::Float));
+    }
+
+    #[test]
+    fn infer_attribute_unknown_field() {
+        let mut module = Module::new("test", "test.py");
+
+        module.body.push(Statement::ClassDef {
+            name: "Item".into(),
+            bases: vec![],
+            fields: vec![("price".into(), TypeAnnotation::Float)],
+            methods: vec![],
+        });
+
+        module.body.push(Statement::Assign {
+            target: "item".into(),
+            annotation: None,
+            value: Expression::Call {
+                func: Box::new(Expression::Name {
+                    id: "Item".into(),
+                    ty: TypeAnnotation::Unknown,
+                }),
+                args: vec![],
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        module.body.push(Statement::Assign {
+            target: "x".into(),
+            annotation: None,
+            value: Expression::Attribute {
+                value: Box::new(Expression::Name {
+                    id: "item".into(),
+                    ty: TypeAnnotation::Unknown,
+                }),
+                attr: "nonexistent".into(),
+                ty: TypeAnnotation::Unknown,
+            },
+        });
+
+        let mut engine = InferenceEngine::new();
+        engine.infer_module(&mut module).unwrap();
+        assert_eq!(engine.ctx.lookup("x"), Some(&TypeAnnotation::Unknown));
     }
 }

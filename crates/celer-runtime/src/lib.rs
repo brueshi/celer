@@ -3,6 +3,7 @@ pub mod compiled;
 pub mod config;
 pub mod cpython_runner;
 pub mod error;
+pub mod fallback;
 pub mod linker;
 pub mod native;
 
@@ -11,5 +12,6 @@ pub use compiled::CompiledModule;
 pub use config::{OptLevel, RuntimeConfig};
 pub use cpython_runner::run_python_function;
 pub use error::RuntimeError;
+pub use fallback::FallbackDispatcher;
 pub use linker::{link_shared, shared_lib_extension};
-pub use native::NativeModule;
+pub use native::{NativeModule, Value};

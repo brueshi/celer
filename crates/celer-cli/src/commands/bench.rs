@@ -21,7 +21,7 @@ pub struct BenchArgs {
 }
 
 pub fn execute(args: &BenchArgs) -> Result<()> {
-    let workloads = celer_bench::Workload::builtin_workloads();
+    let workloads = celer_bench::Workload::all_workloads();
     let runner = celer_bench::BenchRunner::new(args.warmup, args.iterations);
 
     let mut results = Vec::new();
@@ -40,9 +40,9 @@ pub fn execute(args: &BenchArgs) -> Result<()> {
 
         // Compile to native
         println!("Compiling {} (celer-aot)...", workload.name);
-        let obj_path = temp_dir.join(format!("{}.o", workload.function_name));
+        let obj_path = temp_dir.join(format!("{}.o", workload.name));
         let ext = celer_runtime::shared_lib_extension();
-        let lib_path = temp_dir.join(format!("{}.{}", workload.function_name, ext));
+        let lib_path = temp_dir.join(format!("{}.{}", workload.name, ext));
 
         match compile_workload(workload, &obj_path, &lib_path) {
             Ok(()) => {
@@ -83,7 +83,7 @@ fn compile_workload(
     lib_path: &Path,
 ) -> Result<()> {
     pipeline::compile_to_object(
-        &workload.function_name,
+        &workload.name,
         "<bench>",
         &workload.python_source,
         obj_path,

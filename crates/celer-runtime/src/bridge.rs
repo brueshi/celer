@@ -21,11 +21,14 @@ impl CpythonBridge {
         })
     }
 
-    /// Execute a compiled module (stub -- will invoke native code in the future).
-    pub fn execute(&self, _module: &CompiledModule) -> Result<(), RuntimeError> {
-        // TODO: load and execute the compiled object file
-        tracing::info!("execute called (stub)");
-        Ok(())
+    /// Execute a compiled module by loading the native shared library.
+    pub fn execute(&self, module: &CompiledModule) -> Result<crate::native::Value, RuntimeError> {
+        let native = unsafe { crate::NativeModule::load(&module.object_path)? };
+        let entry = module
+            .entry_point
+            .as_deref()
+            .ok_or_else(|| RuntimeError::ExecutionFailed("no entry point specified".into()))?;
+        native.call(entry, &[])
     }
 
     pub fn config(&self) -> &RuntimeConfig {
