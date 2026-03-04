@@ -607,4 +607,434 @@ mod tests {
         compiler.compile_module(&module).unwrap();
         compiler.verify().unwrap();
     }
+
+    // -- Phase 3: String operations and builtins --
+
+    #[test]
+    fn builtin_len_on_string() {
+        // def string_len(s: str) -> int:
+        //     return len(s)
+        let func = Function {
+            name: "string_len".into(),
+            params: vec![Parameter {
+                name: "s".into(),
+                annotation: TypeAnnotation::Str,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![Statement::Return {
+                value: Some(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: "len".into(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "s".into(),
+                        ty: TypeAnnotation::Str,
+                    }],
+                    ty: TypeAnnotation::Int,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("strlen"), "IR should call strlen for len()");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn builtin_str_on_int() {
+        // def to_string(n: int) -> str:
+        //     return str(n)
+        let func = Function {
+            name: "to_string".into(),
+            params: vec![Parameter {
+                name: "n".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Str,
+            body: vec![Statement::Return {
+                value: Some(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: "str".into(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "n".into(),
+                        ty: TypeAnnotation::Int,
+                    }],
+                    ty: TypeAnnotation::Str,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("snprintf"), "IR should call snprintf for str()");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn builtin_int_from_string() {
+        // def parse_int(s: str) -> int:
+        //     return int(s)
+        let func = Function {
+            name: "parse_int".into(),
+            params: vec![Parameter {
+                name: "s".into(),
+                annotation: TypeAnnotation::Str,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![Statement::Return {
+                value: Some(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: "int".into(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "s".into(),
+                        ty: TypeAnnotation::Str,
+                    }],
+                    ty: TypeAnnotation::Int,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("strtol"), "IR should call strtol for int()");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn builtin_float_from_string() {
+        // def parse_float(s: str) -> float:
+        //     return float(s)
+        let func = Function {
+            name: "parse_float".into(),
+            params: vec![Parameter {
+                name: "s".into(),
+                annotation: TypeAnnotation::Str,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Float,
+            body: vec![Statement::Return {
+                value: Some(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: "float".into(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "s".into(),
+                        ty: TypeAnnotation::Str,
+                    }],
+                    ty: TypeAnnotation::Float,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("strtod"), "IR should call strtod for float()");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn builtin_bool_from_int() {
+        // def truthy(x: int) -> bool:
+        //     return bool(x)
+        let func = Function {
+            name: "truthy".into(),
+            params: vec![Parameter {
+                name: "x".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Bool,
+            body: vec![Statement::Return {
+                value: Some(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: "bool".into(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "x".into(),
+                        ty: TypeAnnotation::Int,
+                    }],
+                    ty: TypeAnnotation::Bool,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn string_equality_comparison() {
+        // def str_eq(a: str, b: str) -> bool:
+        //     return a == b
+        let func = Function {
+            name: "str_eq".into(),
+            params: vec![
+                Parameter {
+                    name: "a".into(),
+                    annotation: TypeAnnotation::Str,
+                    default: None,
+                },
+                Parameter {
+                    name: "b".into(),
+                    annotation: TypeAnnotation::Str,
+                    default: None,
+                },
+            ],
+            return_type: TypeAnnotation::Bool,
+            body: vec![Statement::Return {
+                value: Some(Expression::BinaryOp {
+                    op: BinaryOp::Eq,
+                    left: Box::new(Expression::Name {
+                        id: "a".into(),
+                        ty: TypeAnnotation::Str,
+                    }),
+                    right: Box::new(Expression::Name {
+                        id: "b".into(),
+                        ty: TypeAnnotation::Str,
+                    }),
+                    ty: TypeAnnotation::Bool,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(ir.contains("strcmp"), "IR should call strcmp for string ==");
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn string_concatenation() {
+        // def concat(a: str, b: str) -> str:
+        //     return a + b
+        let func = Function {
+            name: "concat".into(),
+            params: vec![
+                Parameter {
+                    name: "a".into(),
+                    annotation: TypeAnnotation::Str,
+                    default: None,
+                },
+                Parameter {
+                    name: "b".into(),
+                    annotation: TypeAnnotation::Str,
+                    default: None,
+                },
+            ],
+            return_type: TypeAnnotation::Str,
+            body: vec![Statement::Return {
+                value: Some(Expression::BinaryOp {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expression::Name {
+                        id: "a".into(),
+                        ty: TypeAnnotation::Str,
+                    }),
+                    right: Box::new(Expression::Name {
+                        id: "b".into(),
+                        ty: TypeAnnotation::Str,
+                    }),
+                    ty: TypeAnnotation::Str,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+
+        let ir = compiler.dump_ir();
+        assert!(
+            ir.contains("snprintf"),
+            "IR should call snprintf for string concat"
+        );
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn for_loop_range_start_stop() {
+        // def sum_range(start: int, stop: int) -> int:
+        //     total = 0
+        //     for i in range(start, stop):
+        //         total = total + i
+        //     return total
+        let func = Function {
+            name: "sum_range".into(),
+            params: vec![
+                Parameter {
+                    name: "start".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                },
+                Parameter {
+                    name: "stop".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                },
+            ],
+            return_type: TypeAnnotation::Int,
+            body: vec![
+                Statement::Assign {
+                    target: "total".into(),
+                    annotation: None,
+                    value: Expression::IntLiteral(0),
+                },
+                Statement::For {
+                    target: "i".into(),
+                    iter: Expression::Call {
+                        func: Box::new(Expression::Name {
+                            id: "range".into(),
+                            ty: TypeAnnotation::Unknown,
+                        }),
+                        args: vec![
+                            Expression::Name {
+                                id: "start".into(),
+                                ty: TypeAnnotation::Int,
+                            },
+                            Expression::Name {
+                                id: "stop".into(),
+                                ty: TypeAnnotation::Int,
+                            },
+                        ],
+                        ty: TypeAnnotation::Unknown,
+                    },
+                    body: vec![Statement::AugAssign {
+                        target: "total".into(),
+                        op: BinaryOp::Add,
+                        value: Expression::Name {
+                            id: "i".into(),
+                            ty: TypeAnnotation::Int,
+                        },
+                    }],
+                },
+                Statement::Return {
+                    value: Some(Expression::Name {
+                        id: "total".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                },
+            ],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+        compiler.verify().unwrap();
+    }
+
+    #[test]
+    fn for_loop_range_start_stop_step() {
+        // def sum_step(n: int) -> int:
+        //     total = 0
+        //     for i in range(0, n, 2):
+        //         total = total + i
+        //     return total
+        let func = Function {
+            name: "sum_step".into(),
+            params: vec![Parameter {
+                name: "n".into(),
+                annotation: TypeAnnotation::Int,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![
+                Statement::Assign {
+                    target: "total".into(),
+                    annotation: None,
+                    value: Expression::IntLiteral(0),
+                },
+                Statement::For {
+                    target: "i".into(),
+                    iter: Expression::Call {
+                        func: Box::new(Expression::Name {
+                            id: "range".into(),
+                            ty: TypeAnnotation::Unknown,
+                        }),
+                        args: vec![
+                            Expression::IntLiteral(0),
+                            Expression::Name {
+                                id: "n".into(),
+                                ty: TypeAnnotation::Int,
+                            },
+                            Expression::IntLiteral(2),
+                        ],
+                        ty: TypeAnnotation::Unknown,
+                    },
+                    body: vec![Statement::AugAssign {
+                        target: "total".into(),
+                        op: BinaryOp::Add,
+                        value: Expression::Name {
+                            id: "i".into(),
+                            ty: TypeAnnotation::Int,
+                        },
+                    }],
+                },
+                Statement::Return {
+                    value: Some(Expression::Name {
+                        id: "total".into(),
+                        ty: TypeAnnotation::Int,
+                    }),
+                },
+            ],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let module = make_module(vec![Statement::FunctionDef(func)]);
+        let context = Context::create();
+        let mut compiler = Compiler::new(&context, "test");
+        compiler.compile_module(&module).unwrap();
+        compiler.verify().unwrap();
+    }
 }

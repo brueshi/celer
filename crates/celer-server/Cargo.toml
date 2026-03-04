@@ -1,0 +1,18 @@
+[package]
+name = "celer-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Lightweight HTTP server for compiled Celer routes"
+
+[dependencies]
+celer-hir.workspace = true
+celer-fastapi.workspace = true
+celer-runtime.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

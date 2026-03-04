@@ -121,16 +121,20 @@ impl<'a> CompilabilityAnalyzer<'a> {
     }
 
     fn is_compilable_type(&self, ty: &TypeAnnotation) -> bool {
-        matches!(
-            ty,
+        match ty {
             TypeAnnotation::Int
-                | TypeAnnotation::Float
-                | TypeAnnotation::Bool
-                | TypeAnnotation::Str
-                | TypeAnnotation::None
-                | TypeAnnotation::Dict(_, _)
-                | TypeAnnotation::Unknown
-        )
+            | TypeAnnotation::Float
+            | TypeAnnotation::Bool
+            | TypeAnnotation::Str
+            | TypeAnnotation::None
+            | TypeAnnotation::Dict(_, _)
+            | TypeAnnotation::Unknown => true,
+            TypeAnnotation::List(inner) => self.is_compilable_type(inner),
+            TypeAnnotation::Tuple(elements) => {
+                elements.iter().all(|t| self.is_compilable_type(t))
+            }
+            _ => false,
+        }
     }
 
     fn check_statement(
@@ -228,7 +232,9 @@ impl<'a> CompilabilityAnalyzer<'a> {
             Expression::Call { func, args, .. } => {
                 // Check if it's a known compilable function
                 if let Expression::Name { id, .. } = func.as_ref() {
-                    if id != "range"
+                    const BUILTIN_FUNCTIONS: &[&str] =
+                        &["range", "len", "str", "int", "float", "bool"];
+                    if !BUILTIN_FUNCTIONS.contains(&id.as_str())
                         && !known_functions.contains_key(id.as_str())
                         && self.ctx.lookup_function(id).is_none()
                     {
@@ -252,14 +258,60 @@ impl<'a> CompilabilityAnalyzer<'a> {
             Expression::Attribute { .. } => {
                 issues.push("attribute access not natively compilable".into());
             }
-            Expression::Subscript { .. } => {
-                issues.push("subscript access not natively compilable".into());
+            Expression::Subscript {
+                value,
+                index,
+                ty,
+                ..
+            } => {
+                // Allow subscript on list/tuple types with compilable element types
+                let value_ty = value.ty();
+                match value_ty {
+                    TypeAnnotation::List(inner) if self.is_compilable_type(inner) => {
+                        self.check_expression(value, known_functions, issues);
+                        self.check_expression(index, known_functions, issues);
+                    }
+                    TypeAnnotation::Tuple(elems)
+                        if elems.iter().all(|t| self.is_compilable_type(t)) =>
+                    {
+                        self.check_expression(value, known_functions, issues);
+                        self.check_expression(index, known_functions, issues);
+                    }
+                    _ => {
+                        if !self.is_compilable_type(ty) {
+                            issues.push("subscript access not natively compilable".into());
+                        } else {
+                            self.check_expression(value, known_functions, issues);
+                            self.check_expression(index, known_functions, issues);
+                        }
+                    }
+                }
             }
-            Expression::List { .. } => {
-                issues.push("list expressions not natively compilable".into());
+            Expression::List { elements, ty, .. } => {
+                if let TypeAnnotation::List(inner) = ty {
+                    if self.is_compilable_type(inner) {
+                        for elem in elements {
+                            self.check_expression(elem, known_functions, issues);
+                        }
+                    } else {
+                        issues.push("list expressions not natively compilable".into());
+                    }
+                } else {
+                    issues.push("list expressions not natively compilable".into());
+                }
             }
-            Expression::Tuple { .. } => {
-                issues.push("tuple expressions not natively compilable".into());
+            Expression::Tuple { elements, ty, .. } => {
+                if let TypeAnnotation::Tuple(elem_types) = ty {
+                    if elem_types.iter().all(|t| self.is_compilable_type(t)) {
+                        for elem in elements {
+                            self.check_expression(elem, known_functions, issues);
+                        }
+                    } else {
+                        issues.push("tuple expressions not natively compilable".into());
+                    }
+                } else {
+                    issues.push("tuple expressions not natively compilable".into());
+                }
             }
             Expression::IfExpr {
                 test,
@@ -411,7 +463,7 @@ mod tests {
             is_async: false,
         }));
 
-        // Non-compilable function (uses list)
+        // Now-compilable function (uses list with compilable inner type)
         module.body.push(Statement::FunctionDef(Function {
             name: "make_list".into(),
             params: vec![],
@@ -426,12 +478,24 @@ mod tests {
             is_async: false,
         }));
 
+        // Non-compilable function (uses class type)
+        module.body.push(Statement::FunctionDef(Function {
+            name: "make_obj".into(),
+            params: vec![],
+            return_type: TypeAnnotation::Class("MyClass".into()),
+            body: vec![Statement::Return {
+                value: Some(Expression::NoneLiteral),
+            }],
+            decorators: vec![],
+            is_async: false,
+        }));
+
         let ctx = make_ctx();
         let analyzer = CompilabilityAnalyzer::new(&ctx);
         let report = analyzer.analyze_module(&module);
 
-        assert_eq!(report.functions.len(), 2);
-        assert_eq!(report.compilable_functions(), vec!["add"]);
+        assert_eq!(report.functions.len(), 3);
+        assert_eq!(report.compilable_functions(), vec!["add", "make_list"]);
         assert_eq!(report.skipped_functions().len(), 1);
     }
 
@@ -533,5 +597,78 @@ mod tests {
         let report = analyzer.analyze_module(&module);
 
         assert_eq!(report.compilable_functions().len(), 2);
+    }
+
+    #[test]
+    fn builtin_calls_are_compilable() {
+        // Functions using len(), str(), int(), float(), bool() should be fully compilable
+        let func = Function {
+            name: "use_builtins".into(),
+            params: vec![Parameter {
+                name: "s".into(),
+                annotation: TypeAnnotation::Str,
+                default: None,
+            }],
+            return_type: TypeAnnotation::Int,
+            body: vec![Statement::Return {
+                value: Some(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: "len".into(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "s".into(),
+                        ty: TypeAnnotation::Str,
+                    }],
+                    ty: TypeAnnotation::Int,
+                }),
+            }],
+            decorators: vec![],
+            is_async: false,
+        };
+
+        let ctx = make_ctx();
+        let analyzer = CompilabilityAnalyzer::new(&ctx);
+        let known = HashMap::from([("use_builtins".into(), true)]);
+        let status = analyzer.analyze_function(&func, &known);
+        assert_eq!(status, Compilability::Full);
+    }
+
+    #[test]
+    fn all_builtins_recognized() {
+        for builtin in &["len", "str", "int", "float", "bool"] {
+            let func = Function {
+                name: "test_fn".into(),
+                params: vec![Parameter {
+                    name: "x".into(),
+                    annotation: TypeAnnotation::Int,
+                    default: None,
+                }],
+                return_type: TypeAnnotation::Int,
+                body: vec![Statement::Expr(Expression::Call {
+                    func: Box::new(Expression::Name {
+                        id: builtin.to_string(),
+                        ty: TypeAnnotation::Unknown,
+                    }),
+                    args: vec![Expression::Name {
+                        id: "x".into(),
+                        ty: TypeAnnotation::Int,
+                    }],
+                    ty: TypeAnnotation::Unknown,
+                })],
+                decorators: vec![],
+                is_async: false,
+            };
+
+            let ctx = make_ctx();
+            let analyzer = CompilabilityAnalyzer::new(&ctx);
+            let known = HashMap::from([("test_fn".into(), true)]);
+            let status = analyzer.analyze_function(&func, &known);
+            assert_eq!(
+                status,
+                Compilability::Full,
+                "builtin {builtin}() should be recognized as compilable"
+            );
+        }
     }
 }

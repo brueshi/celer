@@ -92,3 +92,63 @@ def calculate_price(base_price: int) -> dict:
 - Business logic demonstrates compiled cross-function calls (`calculate_price` calls `apply_discount` directly via native `call` instruction)
 - Static JSON jumped from 28x to 46x due to release-mode optimizations in the benchmark runner
 - All four workloads sit in the 23-46x range, consistent with eliminating CPython's per-operation overhead on type-resolved code
+
+---
+
+## Phase 3: Framework Adapters & HTTP Runtime (2026-03-04)
+
+Added for-loop codegen (range-based iteration), HTTP server with route dispatch, FastAPI/Flask adapter route extraction, string builtins (len/str/int/float/bool), list/tuple codegen, and `celerate serve` command for serving compiled handlers over HTTP.
+
+**Scope**: All prior workloads plus for-loop sum, HTTP path parameter extraction, and HTTP compute endpoint.
+
+```
+Workload                   Runner             Ops/sec     Avg (ns)    Speedup
+---------------------------------------------------------------------------
+json-serialize-static      cpython             126508         7905       1.0x
+json-serialize-static      celer-aot          4636176          216      36.6x
+json-serialize-dynamic     cpython             119081         8398       1.0x
+json-serialize-dynamic     celer-aot          4172600          240      35.0x
+fibonacci                  cpython             166534         6005       1.0x
+fibonacci                  celer-aot          3686319          271      22.1x
+for-loop-sum               cpython              33827        29563       1.0x
+for-loop-sum               celer-aot           513878         1946      15.2x
+business-logic             cpython             118228         8458       1.0x
+business-logic             celer-aot          3190772          313      27.0x
+http-path-param            cpython             117768         8491       1.0x
+http-path-param            celer-aot          3699331          270      31.4x
+http-compute-endpoint      cpython              89077        11226       1.0x
+http-compute-endpoint      celer-aot          1777293          563      20.0x
+```
+
+### New Target Code
+
+```python
+# For-loop sum: range-based iteration with type-inferred loop variable
+def range_sum(n: int) -> int:
+    total = 0
+    for i in range(n):
+        total = total + i
+    return total
+
+# HTTP path param: simulates FastAPI route handler
+def get_item(item_id: int) -> dict:
+    return {"item_id": item_id, "name": "widget", "in_stock": True}
+
+# HTTP compute endpoint: loop + JSON return
+def compute(n: int) -> dict:
+    result = 0
+    i = 0
+    while i < n:
+        result = result + i
+        i = i + 1
+    return {"result": result, "input": n}
+```
+
+### Key Observations
+
+- **For-loop range()**: Type inference now recognizes `range()` as producing `Int` iterators, enabling `for i in range(n)` compilation. The 15x speedup reflects loop overhead being higher than simple arithmetic (function call overhead per range iteration vs native `icmp`/`add`/`br`)
+- **HTTP workloads**: Path parameter handlers and compute endpoints compile identically to their standalone equivalents -- the FastAPI decorator is stripped during route extraction, leaving a pure function for AOT compilation
+- **Production-ready serving**: `celerate serve main:app` now starts an HTTP server with compiled route handlers, achieving native-speed JSON responses behind a hyper/tokio stack
+- **Framework adapters**: FastAPI routes extracted via decorator analysis; Flask adapter added with `@app.route()` and Flask 2.0+ shorthand support
+- **New codegen features**: String builtins (len/str/int/float/bool), string comparison (strcmp), string concatenation (snprintf), list/tuple stack allocation with bounds-checked subscript access
+- All 7 workloads compile successfully, with speedups ranging from 15-37x over CPython

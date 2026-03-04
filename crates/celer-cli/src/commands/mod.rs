@@ -1,6 +1,7 @@
 pub mod bench;
 pub mod compile;
 pub mod run;
+pub mod serve;
 
 use clap::Subcommand;
 
@@ -12,4 +13,6 @@ pub enum Command {
     Run(run::RunArgs),
     /// Run built-in benchmarks comparing CPython vs Celer AOT
     Bench(bench::BenchArgs),
+    /// Serve a FastAPI app with compiled native handlers
+    Serve(serve::ServeArgs),
 }

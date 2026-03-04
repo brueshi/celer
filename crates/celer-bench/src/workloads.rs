@@ -25,6 +25,7 @@ pub enum WorkloadCategory {
     Json,
     Compute,
     BusinessLogic,
+    Http,
 }
 
 impl Workload {
@@ -50,14 +51,24 @@ impl Workload {
     }
 
     pub fn compute_workloads() -> Vec<Workload> {
-        vec![Workload {
-            name: "fibonacci".into(),
-            python_source: FIBONACCI_SOURCE.into(),
-            function_name: "fib".into(),
-            arg: Some(30),
-            expected_output_contains: "832040".into(),
-            return_kind: ReturnKind::ScalarI64,
-        }]
+        vec![
+            Workload {
+                name: "fibonacci".into(),
+                python_source: FIBONACCI_SOURCE.into(),
+                function_name: "fib".into(),
+                arg: Some(30),
+                expected_output_contains: "832040".into(),
+                return_kind: ReturnKind::ScalarI64,
+            },
+            Workload {
+                name: "for-loop-sum".into(),
+                python_source: FOR_LOOP_SUM_SOURCE.into(),
+                function_name: "range_sum".into(),
+                arg: Some(1000),
+                expected_output_contains: "499500".into(),
+                return_kind: ReturnKind::ScalarI64,
+            },
+        ]
     }
 
     pub fn business_logic_workloads() -> Vec<Workload> {
@@ -71,10 +82,32 @@ impl Workload {
         }]
     }
 
+    pub fn http_workloads() -> Vec<Workload> {
+        vec![
+            Workload {
+                name: "http-path-param".into(),
+                python_source: PATH_PARAM_SOURCE.into(),
+                function_name: "get_item".into(),
+                arg: Some(42),
+                expected_output_contains: r#""item_id""#.into(),
+                return_kind: ReturnKind::Json,
+            },
+            Workload {
+                name: "http-compute-endpoint".into(),
+                python_source: COMPUTE_ENDPOINT_SOURCE.into(),
+                function_name: "compute".into(),
+                arg: Some(100),
+                expected_output_contains: "result".into(),
+                return_kind: ReturnKind::Json,
+            },
+        ]
+    }
+
     pub fn all_workloads() -> Vec<Workload> {
         let mut all = Self::builtin_workloads();
         all.extend(Self::compute_workloads());
         all.extend(Self::business_logic_workloads());
+        all.extend(Self::http_workloads());
         all
     }
 }
@@ -102,6 +135,14 @@ def fib(n: int) -> int:
     return a
 "#;
 
+const FOR_LOOP_SUM_SOURCE: &str = r#"
+def range_sum(n: int) -> int:
+    total = 0
+    for i in range(n):
+        total = total + i
+    return total
+"#;
+
 const BUSINESS_LOGIC_SOURCE: &str = r#"
 def apply_discount(price: int, threshold: int) -> int:
     if price > threshold:
@@ -111,4 +152,19 @@ def apply_discount(price: int, threshold: int) -> int:
 def calculate_price(base_price: int) -> dict:
     final_price = apply_discount(base_price, 50)
     return {"price": final_price, "currency": "USD"}
+"#;
+
+const PATH_PARAM_SOURCE: &str = r#"
+def get_item(item_id: int) -> dict:
+    return {"item_id": item_id, "name": "widget", "in_stock": True}
+"#;
+
+const COMPUTE_ENDPOINT_SOURCE: &str = r#"
+def compute(n: int) -> dict:
+    result = 0
+    i = 0
+    while i < n:
+        result = result + i
+        i = i + 1
+    return {"result": result, "input": n}
 "#;

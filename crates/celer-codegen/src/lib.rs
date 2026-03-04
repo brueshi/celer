@@ -1,5 +1,6 @@
 pub mod compiler;
 pub mod context;
+pub mod emit_collection;
 pub mod emit_expr;
 pub mod emit_function;
 pub mod emit_json;

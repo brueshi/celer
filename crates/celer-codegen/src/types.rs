@@ -20,6 +20,9 @@ pub fn resolve_type<'ctx>(
         TypeAnnotation::Unknown => Err(CodegenError::UnresolvedType),
         // Dict returns are handled via output parameters, not as a return type
         TypeAnnotation::Dict(_, _) => Ok(None),
+        // Lists and tuples are represented as stack-allocated structs passed by pointer
+        TypeAnnotation::List(_) => Ok(Some(context.ptr_type(AddressSpace::default()).into())),
+        TypeAnnotation::Tuple(_) => Ok(Some(context.ptr_type(AddressSpace::default()).into())),
         _ => Err(CodegenError::UnsupportedType(format!("{ty:?}"))),
     }
 }

@@ -230,26 +230,49 @@ fn emit_for<'ctx>(
     iter: &Expression,
     body: &[Statement],
 ) -> Result<(), CodegenError> {
-    // Only support range(n) for now
-    let limit = match iter {
+    // Extract start, stop, step from range() call
+    let (start_val, stop_val, step_val) = match iter {
         Expression::Call { func, args, .. } => {
             if let Expression::Name { id, .. } = func.as_ref() {
-                if id == "range" && args.len() == 1 {
-                    emit_expression(ctx, &args[0])?
+                if id == "range" && (1..=3).contains(&args.len()) {
+                    match args.len() {
+                        1 => {
+                            let stop = emit_expression(ctx, &args[0])?;
+                            let i64_ty = ctx.context.i64_type();
+                            (
+                                i64_ty.const_int(0, false).into(),
+                                stop,
+                                i64_ty.const_int(1, false).into(),
+                            )
+                        }
+                        2 => {
+                            let start = emit_expression(ctx, &args[0])?;
+                            let stop = emit_expression(ctx, &args[1])?;
+                            let i64_ty = ctx.context.i64_type();
+                            (start, stop, i64_ty.const_int(1, false).into())
+                        }
+                        3 => {
+                            let start = emit_expression(ctx, &args[0])?;
+                            let stop = emit_expression(ctx, &args[1])?;
+                            let step = emit_expression(ctx, &args[2])?;
+                            (start, stop, step)
+                        }
+                        _ => unreachable!(),
+                    }
                 } else {
                     return Err(CodegenError::UnsupportedExpression(
-                        "only range(n) for loops supported".into(),
+                        "only range() for loops supported".into(),
                     ));
                 }
             } else {
                 return Err(CodegenError::UnsupportedExpression(
-                    "only range(n) for loops supported".into(),
+                    "only range() for loops supported".into(),
                 ));
             }
         }
         _ => {
             return Err(CodegenError::UnsupportedExpression(
-                "only range(n) for loops supported".into(),
+                "only range() for loops supported".into(),
             ))
         }
     };
@@ -260,7 +283,7 @@ fn emit_for<'ctx>(
         .build_alloca(i64_ty, target)
         .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
     ctx.builder
-        .build_store(counter, i64_ty.const_int(0, false))
+        .build_store(counter, start_val)
         .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
     ctx.set_local(target, counter);
 
@@ -272,7 +295,7 @@ fn emit_for<'ctx>(
         .build_unconditional_branch(cond_bb)
         .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-    // Condition: counter < limit
+    // Condition: counter < stop
     ctx.builder.position_at_end(cond_bb);
     let cur = ctx
         .builder
@@ -283,7 +306,7 @@ fn emit_for<'ctx>(
         .build_int_compare(
             IntPredicate::SLT,
             cur.into_int_value(),
-            limit.into_int_value(),
+            stop_val.into_int_value(),
             "cmp",
         )
         .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -299,7 +322,7 @@ fn emit_for<'ctx>(
     }
     ctx.pop_loop();
 
-    // Increment counter
+    // Increment counter by step
     if ctx
         .builder
         .get_insert_block()
@@ -313,7 +336,7 @@ fn emit_for<'ctx>(
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         let next = ctx
             .builder
-            .build_int_add(cur.into_int_value(), i64_ty.const_int(1, false), "next")
+            .build_int_add(cur.into_int_value(), step_val.into_int_value(), "next")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         ctx.builder
             .build_store(counter, next)

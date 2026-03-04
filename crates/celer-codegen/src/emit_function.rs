@@ -106,6 +106,7 @@ pub fn emit_function<'ctx>(
                     let default_val: BasicValueEnum<'ctx> = match ty {
                         inkwell::types::BasicTypeEnum::IntType(t) => t.const_zero().into(),
                         inkwell::types::BasicTypeEnum::FloatType(t) => t.const_zero().into(),
+                        inkwell::types::BasicTypeEnum::PointerType(t) => t.const_null().into(),
                         _ => {
                             ctx.builder
                                 .build_unreachable()
@@ -145,6 +146,7 @@ fn emit_scalar_function_decl<'ctx>(
     let fn_type = match ret_type {
         Some(inkwell::types::BasicTypeEnum::IntType(t)) => t.fn_type(&param_types, false),
         Some(inkwell::types::BasicTypeEnum::FloatType(t)) => t.fn_type(&param_types, false),
+        Some(inkwell::types::BasicTypeEnum::PointerType(t)) => t.fn_type(&param_types, false),
         None => ctx.context.void_type().fn_type(&param_types, false),
         _ => {
             return Err(CodegenError::UnsupportedType(format!(
@@ -259,9 +261,13 @@ fn emit_snprintf_json<'ctx>(
     buf_global.set_initializer(&buf_ty.const_zero());
     let buf = buf_global.as_pointer_value();
 
-    // Format string global
+    // Format string global (must be null-terminated for snprintf)
     let fmt_name = format!("fmt_{}", fn_val.get_name().to_str().unwrap_or("anon"));
-    let fmt_global = ctx.add_string_constant(format, &fmt_name);
+    let fmt_global = ctx
+        .builder
+        .build_global_string_ptr(format, &fmt_name)
+        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+        .as_pointer_value();
 
     // Build snprintf call arguments
     let buf_size = i64_ty.const_int(SNPRINTF_BUF_SIZE, false);

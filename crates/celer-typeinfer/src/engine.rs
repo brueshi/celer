@@ -135,9 +135,17 @@ impl InferenceEngine {
                 self.infer_expression(iter)?;
                 self.ctx.push_scope();
                 let iter_ty = self.infer_expression(iter)?;
-                let elem_ty = match iter_ty {
-                    TypeAnnotation::List(inner) => *inner,
-                    TypeAnnotation::Set(inner) => *inner,
+                let elem_ty = match &iter_ty {
+                    TypeAnnotation::List(inner) => *inner.clone(),
+                    TypeAnnotation::Set(inner) => *inner.clone(),
+                    // range() calls produce Int iterators
+                    TypeAnnotation::Unknown => {
+                        if Self::is_range_call(iter) {
+                            TypeAnnotation::Int
+                        } else {
+                            TypeAnnotation::Unknown
+                        }
+                    }
                     _ => TypeAnnotation::Unknown,
                 };
                 self.ctx.define(target.clone(), elem_ty);
@@ -423,6 +431,16 @@ impl InferenceEngine {
             }
         }
         Ok(first)
+    }
+
+    /// Check if an expression is a call to the `range()` builtin.
+    fn is_range_call(expr: &Expression) -> bool {
+        matches!(
+            expr,
+            Expression::Call { func, args, .. }
+            if matches!(func.as_ref(), Expression::Name { id, .. } if id == "range")
+                && (1..=3).contains(&args.len())
+        )
     }
 }
 
