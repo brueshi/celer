@@ -6,12 +6,15 @@ members = [
     "crates/celer-codegen",
     "crates/celer-runtime",
     "crates/celer-cli",
+    "crates/celer-adapter-core",
     "crates/celer-fastapi",
     "crates/celer-flask",
     "crates/celer-django",
     "crates/celer-bench",
     "crates/celer-server",
+    "crates/celer-cloud",
 ]
+exclude = ["benches/rust"]
 resolver = "3"
 
 [workspace.package]
@@ -21,6 +24,7 @@ license = "MIT"
 
 [workspace.dependencies]
 # Internal crates
+celer-adapter-core = { path = "crates/celer-adapter-core" }
 celer-hir = { path = "crates/celer-hir" }
 celer-parser = { path = "crates/celer-parser" }
 celer-typeinfer = { path = "crates/celer-typeinfer" }
@@ -31,6 +35,7 @@ celer-flask = { path = "crates/celer-flask" }
 celer-django = { path = "crates/celer-django" }
 celer-bench = { path = "crates/celer-bench" }
 celer-server = { path = "crates/celer-server" }
+celer-cloud = { path = "crates/celer-cloud" }
 
 # External dependencies
 rustpython-parser = "0.4.0"
@@ -49,3 +54,5 @@ hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-grac
 http-body-util = "0.1"
 tokio = { version = "1", features = ["full"] }
 bytes = "1"
+dashmap = "6"
+uuid = { version = "1", features = ["v4"] }

@@ -61,7 +61,7 @@ pub fn execute(args: &ServeArgs) -> Result<()> {
     // Link to shared library
     celer_runtime::link_shared(&obj_path, &lib_path).context("linking failed")?;
 
-    // Parse module to extract FastAPI routes
+    // Parse module to extract routes via auto-detection
     let mut module =
         celer_parser::parse_module(&name, &module_path, &source).context("parsing failed")?;
     let mut engine = celer_typeinfer::InferenceEngine::new();
@@ -69,11 +69,19 @@ pub fn execute(args: &ServeArgs) -> Result<()> {
         .infer_module(&mut module)
         .context("type inference failed")?;
 
-    let routes = celer_fastapi::FastApiAdapter::extract_routes(&module)
+    let adapters: Vec<Box<dyn celer_adapter_core::FrameworkAdapter>> = vec![
+        Box::new(celer_fastapi::FastApiAdapter),
+        Box::new(celer_flask::FlaskAdapter),
+        Box::new(celer_django::DjangoAdapter),
+    ];
+
+    let (framework_name, routes) = celer_adapter_core::detect::detect_and_extract(&module, &adapters)
         .map_err(|e| anyhow::anyhow!("route extraction failed: {e}"))?;
 
+    println!("Detected framework: {framework_name}");
+
     if routes.is_empty() {
-        bail!("no FastAPI routes found in {module_path}");
+        bail!("no routes found in {module_path}");
     }
 
     // Build router
@@ -82,11 +90,11 @@ pub fn execute(args: &ServeArgs) -> Result<()> {
 
     for route_info in &routes {
         let method = match route_info.method {
-            celer_fastapi::HttpMethod::Get => "GET",
-            celer_fastapi::HttpMethod::Post => "POST",
-            celer_fastapi::HttpMethod::Put => "PUT",
-            celer_fastapi::HttpMethod::Delete => "DELETE",
-            celer_fastapi::HttpMethod::Patch => "PATCH",
+            celer_adapter_core::HttpMethod::Get => "GET",
+            celer_adapter_core::HttpMethod::Post => "POST",
+            celer_adapter_core::HttpMethod::Put => "PUT",
+            celer_adapter_core::HttpMethod::Delete => "DELETE",
+            celer_adapter_core::HttpMethod::Patch => "PATCH",
         };
 
         let is_json = report.json_functions.contains(&route_info.handler.name);
@@ -95,7 +103,7 @@ pub fn execute(args: &ServeArgs) -> Result<()> {
         let mut path_params = Vec::new();
         let mut param_types = Vec::new();
         for param in &route_info.params {
-            if param.source == celer_fastapi::route::ParamSource::Path {
+            if param.source == celer_adapter_core::ParamSource::Path {
                 path_params.push(param.name.clone());
                 let pt = match param.ty {
                     celer_hir::TypeAnnotation::Int => celer_server::ParamType::Int,

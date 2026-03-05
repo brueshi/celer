@@ -4,4 +4,4 @@ pub mod route;
 
 pub use adapter::FlaskAdapter;
 pub use error::FlaskError;
-pub use route::{HttpMethod, RouteInfo};
+pub use celer_adapter_core::{HttpMethod, ParamSource, RouteInfo, RouteParam};

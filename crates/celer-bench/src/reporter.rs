@@ -3,26 +3,29 @@ use crate::runner::BenchResult;
 pub struct Reporter;
 
 impl Reporter {
-    /// Format results as a table string.
+    /// Format results as a table string with multi-runner support.
     pub fn format_table(results: &[BenchResult]) -> String {
         let mut output = String::new();
 
         output.push_str(&format!(
-            "{:<26} {:<13} {:>12} {:>12} {:>10}\n",
+            "{:<28} {:<14} {:>14} {:>12} {:>10}\n",
             "Workload", "Runner", "Ops/sec", "Avg (ns)", "Speedup"
         ));
-        output.push_str(&"-".repeat(75));
+        output.push_str(&"-".repeat(80));
         output.push('\n');
 
-        // Group by workload to compute speedup
-        let workload_names: Vec<String> = results
-            .iter()
-            .map(|r| r.workload_name.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
+        // Preserve workload order from input
+        let mut workload_order = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for r in results {
+            if seen.insert(r.workload_name.clone()) {
+                workload_order.push(r.workload_name.clone());
+            }
+        }
 
-        for wl_name in &workload_names {
+        let mut all_speedups: Vec<f64> = Vec::new();
+
+        for wl_name in &workload_order {
             let wl_results: Vec<&BenchResult> = results
                 .iter()
                 .filter(|r| &r.workload_name == wl_name)
@@ -39,11 +42,28 @@ impl Reporter {
                 let avg_ns = result.avg_ns();
                 let speedup = ops / cpython_ops;
 
+                if result.runner_name != "cpython" {
+                    all_speedups.push(speedup);
+                }
+
                 output.push_str(&format!(
-                    "{:<26} {:<13} {:>12.0} {:>12.0} {:>9.1}x\n",
+                    "{:<28} {:<14} {:>14.0} {:>12.0} {:>9.1}x\n",
                     result.workload_name, result.runner_name, ops, avg_ns, speedup
                 ));
             }
+            output.push('\n');
+        }
+
+        // Geometric mean of all non-cpython speedups
+        if !all_speedups.is_empty() {
+            let geo_mean =
+                all_speedups.iter().product::<f64>().powf(1.0 / all_speedups.len() as f64);
+            output.push_str(&"-".repeat(80));
+            output.push('\n');
+            output.push_str(&format!(
+                "{:<28} {:<14} {:>14} {:>12} {:>9.1}x\n",
+                "geometric-mean", "all", "", "", geo_mean
+            ));
         }
 
         output

@@ -1,3 +1,4 @@
+use celer_adapter_core::FrameworkAdapter;
 use celer_hir::{Function, Module, Statement};
 
 use crate::error::FastApiError;
@@ -8,7 +9,7 @@ pub struct FastApiAdapter;
 
 impl FastApiAdapter {
     /// Scan a module for FastAPI route decorators and extract route information.
-    pub fn extract_routes(module: &Module) -> Result<Vec<RouteInfo>, FastApiError> {
+    pub fn extract_routes_static(module: &Module) -> Result<Vec<RouteInfo>, FastApiError> {
         let mut routes = Vec::new();
         for stmt in &module.body {
             if let Statement::FunctionDef(func) = stmt
@@ -65,6 +66,37 @@ impl FastApiAdapter {
     }
 }
 
+impl FrameworkAdapter for FastApiAdapter {
+    fn name(&self) -> &'static str {
+        "FastAPI"
+    }
+
+    fn detect(&self, module: &Module) -> bool {
+        module.body.iter().any(|stmt| {
+            if let Statement::FunctionDef(func) = stmt {
+                func.decorators.iter().any(|d| {
+                    d.contains(".get") || d.contains(".post") || d.contains(".put")
+                    || d.contains(".delete") || d.contains(".patch")
+                })
+            } else {
+                false
+            }
+        })
+    }
+
+    fn extract_routes(&self, module: &Module) -> Result<Vec<RouteInfo>, Box<dyn std::error::Error>> {
+        let mut routes = Vec::new();
+        for stmt in &module.body {
+            if let Statement::FunctionDef(func) = stmt {
+                if let Some(route) = Self::try_extract_route(func)? {
+                    routes.push(route);
+                }
+            }
+        }
+        Ok(routes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,9 +117,31 @@ mod tests {
             path: "main.py".to_string(),
             body: vec![Statement::FunctionDef(func)],
         };
-        let routes = FastApiAdapter::extract_routes(&module).unwrap();
+        let routes = FastApiAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/");
         assert_eq!(routes[0].method, HttpMethod::Get);
+    }
+
+    #[test]
+    fn trait_detect_and_extract() {
+        let func = Function {
+            name: "index".to_string(),
+            params: vec![],
+            return_type: TypeAnnotation::Str,
+            body: vec![],
+            decorators: vec!["app.post(\"/items\")".to_string()],
+            is_async: true,
+        };
+        let module = Module {
+            name: "main".to_string(),
+            path: "main.py".to_string(),
+            body: vec![Statement::FunctionDef(func)],
+        };
+        let adapter = FastApiAdapter;
+        assert!(adapter.detect(&module));
+        let routes = adapter.extract_routes(&module).unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].method, HttpMethod::Post);
     }
 }

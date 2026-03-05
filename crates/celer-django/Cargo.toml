@@ -6,5 +6,6 @@ license.workspace = true
 description = "Django framework adapter for Celer AOT compiler (Phase 2)"
 
 [dependencies]
+celer-adapter-core.workspace = true
 celer-hir.workspace = true
 thiserror.workspace = true

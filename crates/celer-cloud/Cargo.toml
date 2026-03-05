@@ -1,0 +1,26 @@
+[package]
+name = "celer-cloud"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Cloud compilation service for Celer AOT compiler"
+
+[dependencies]
+celer-hir.workspace = true
+celer-parser.workspace = true
+celer-typeinfer.workspace = true
+celer-codegen.workspace = true
+celer-runtime.workspace = true
+inkwell.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+dashmap.workspace = true
+uuid.workspace = true

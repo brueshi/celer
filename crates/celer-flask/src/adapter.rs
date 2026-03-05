@@ -1,3 +1,4 @@
+use celer_adapter_core::FrameworkAdapter;
 use celer_hir::{Function, Module, Statement};
 
 use crate::error::FlaskError;
@@ -11,7 +12,7 @@ impl FlaskAdapter {
     ///
     /// Supports both `@app.route("/path", methods=["GET"])` and
     /// Flask 2.0+ shorthand like `@app.get("/path")`.
-    pub fn extract_routes(module: &Module) -> Result<Vec<RouteInfo>, FlaskError> {
+    pub fn extract_routes_static(module: &Module) -> Result<Vec<RouteInfo>, FlaskError> {
         let mut routes = Vec::new();
         for stmt in &module.body {
             if let Statement::FunctionDef(func) = stmt {
@@ -132,6 +133,36 @@ impl FlaskAdapter {
     }
 }
 
+impl FrameworkAdapter for FlaskAdapter {
+    fn name(&self) -> &'static str {
+        "Flask"
+    }
+
+    fn detect(&self, module: &Module) -> bool {
+        module.body.iter().any(|stmt| {
+            if let Statement::FunctionDef(func) = stmt {
+                func.decorators.iter().any(|d| d.contains(".route")
+                    || d.contains(".get") || d.contains(".post")
+                    || d.contains(".put") || d.contains(".delete")
+                    || d.contains(".patch"))
+            } else {
+                false
+            }
+        })
+    }
+
+    fn extract_routes(&self, module: &Module) -> Result<Vec<celer_adapter_core::RouteInfo>, Box<dyn std::error::Error>> {
+        let mut routes = Vec::new();
+        for stmt in &module.body {
+            if let Statement::FunctionDef(func) = stmt {
+                let mut extracted = Self::try_extract_routes(func)?;
+                routes.append(&mut extracted);
+            }
+        }
+        Ok(routes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,7 +191,7 @@ mod tests {
     fn extract_route_default_get() {
         let func = make_handler("index", vec!["app.route(\"/\")"] );
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/");
         assert_eq!(routes[0].method, HttpMethod::Get);
@@ -171,7 +202,7 @@ mod tests {
     fn extract_route_explicit_get() {
         let func = make_handler("index", vec!["app.route(\"/\", methods=[\"GET\"])"]);
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].method, HttpMethod::Get);
     }
@@ -183,7 +214,7 @@ mod tests {
             vec!["app.route(\"/data\", methods=[\"GET\", \"POST\"])"],
         );
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].method, HttpMethod::Get);
         assert_eq!(routes[0].path, "/data");
@@ -195,7 +226,7 @@ mod tests {
     fn extract_flask2_shorthand_get() {
         let func = make_handler("index", vec!["app.get(\"/\")"]);
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].method, HttpMethod::Get);
     }
@@ -204,7 +235,7 @@ mod tests {
     fn extract_flask2_shorthand_post() {
         let func = make_handler("create", vec!["app.post(\"/items\")"]);
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].method, HttpMethod::Post);
         assert_eq!(routes[0].path, "/items");
@@ -221,7 +252,7 @@ mod tests {
         ] {
             let func = make_handler("handler", vec![dec]);
             let module = make_module(vec![func]);
-            let routes = FlaskAdapter::extract_routes(&module).unwrap();
+            let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
             assert_eq!(routes[0].method, expected);
         }
     }
@@ -233,7 +264,7 @@ mod tests {
             vec!["app.route(\"/items/<int:item_id>\")"],
         );
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/items/{item_id}");
     }
@@ -245,7 +276,7 @@ mod tests {
             vec!["app.route(\"/users/<username>\")"],
         );
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes[0].path, "/users/{username}");
     }
 
@@ -272,7 +303,7 @@ mod tests {
         };
 
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes[0].params.len(), 2);
 
         assert_eq!(routes[0].params[0].name, "item_id");
@@ -291,7 +322,7 @@ mod tests {
             make_handler("create", vec!["app.post(\"/items\")"]),
             make_handler("health", vec!["app.route(\"/health\")"]),
         ]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 3);
     }
 
@@ -306,7 +337,7 @@ mod tests {
             is_async: false,
         };
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert!(routes.is_empty());
     }
 
@@ -314,7 +345,7 @@ mod tests {
     fn single_quoted_path() {
         let func = make_handler("index", vec!["app.route('/')"]);
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes[0].path, "/");
     }
 
@@ -325,9 +356,19 @@ mod tests {
             vec!["app.route('/data', methods=['GET', 'POST'])"],
         );
         let module = make_module(vec![func]);
-        let routes = FlaskAdapter::extract_routes(&module).unwrap();
+        let routes = FlaskAdapter::extract_routes_static(&module).unwrap();
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].method, HttpMethod::Get);
         assert_eq!(routes[1].method, HttpMethod::Post);
+    }
+
+    #[test]
+    fn trait_detect_flask_route() {
+        let func = make_handler("index", vec!["app.route(\"/\")"]);
+        let module = make_module(vec![func]);
+        let adapter = FlaskAdapter;
+        assert!(adapter.detect(&module));
+        let routes = adapter.extract_routes(&module).unwrap();
+        assert_eq!(routes.len(), 1);
     }
 }

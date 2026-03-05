@@ -1,8 +1,9 @@
 use std::ffi::CString;
 use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use pyo3::prelude::*;
 
 use crate::workloads::Workload;
@@ -149,6 +150,48 @@ impl BenchRunner {
                 format!("{}({})", workload.function_name, val)
             }
         }
+    }
+
+    /// Run an external benchmark binary (Go, Rust, etc).
+    /// The binary must accept --iterations N --warmup N and print JSON:
+    /// {"iterations": N, "total_ns": N}
+    pub fn run_external(
+        &self,
+        workload_name: &str,
+        runner_name: &str,
+        binary_path: &Path,
+    ) -> Result<BenchResult> {
+        let output = Command::new(binary_path)
+            .arg("--iterations")
+            .arg(self.bench_iterations.to_string())
+            .arg("--warmup")
+            .arg(self.warmup_iterations.to_string())
+            .output()
+            .with_context(|| format!("failed to run {}", binary_path.display()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("{runner_name} benchmark failed: {stderr}");
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.trim();
+        let parsed: serde_json::Value = serde_json::from_str(line)
+            .with_context(|| format!("failed to parse {runner_name} output: {line}"))?;
+
+        let iterations = parsed["iterations"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("missing iterations field"))?;
+        let total_ns = parsed["total_ns"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("missing total_ns field"))?;
+
+        Ok(BenchResult {
+            workload_name: workload_name.to_string(),
+            runner_name: runner_name.to_string(),
+            iterations,
+            total_duration: Duration::from_nanos(total_ns),
+        })
     }
 }
 

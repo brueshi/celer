@@ -1,4 +1,5 @@
 pub mod bench;
+pub mod cloud;
 pub mod compile;
 pub mod run;
 pub mod serve;
@@ -13,6 +14,8 @@ pub enum Command {
     Run(run::RunArgs),
     /// Run built-in benchmarks comparing CPython vs Celer AOT
     Bench(bench::BenchArgs),
-    /// Serve a FastAPI app with compiled native handlers
+    /// Serve a Python web app with compiled native handlers
     Serve(serve::ServeArgs),
+    /// Start the cloud compilation service
+    Cloud(cloud::CloudArgs),
 }

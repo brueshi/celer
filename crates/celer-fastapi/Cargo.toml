@@ -6,6 +6,7 @@ license.workspace = true
 description = "FastAPI framework adapter for Celer AOT compiler"
 
 [dependencies]
+celer-adapter-core.workspace = true
 celer-hir.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -1,109 +1,10 @@
-use celer_hir::{Function, TypeAnnotation};
+// Re-export shared types from adapter-core
+pub use celer_adapter_core::{HttpMethod, ParamSource, RouteInfo, RouteParam};
+pub use celer_adapter_core::route::extract_path_params;
 
-/// HTTP methods supported by Flask routes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HttpMethod {
-    Get,
-    Post,
-    Put,
-    Delete,
-    Patch,
-}
+// Flask-specific path normalization below
 
-impl HttpMethod {
-    /// Parse an HTTP method string (case-insensitive).
-    pub fn from_str_loose(s: &str) -> Option<Self> {
-        match s.trim().to_uppercase().as_str() {
-            "GET" => Some(Self::Get),
-            "POST" => Some(Self::Post),
-            "PUT" => Some(Self::Put),
-            "DELETE" => Some(Self::Delete),
-            "PATCH" => Some(Self::Patch),
-            _ => None,
-        }
-    }
-}
-
-/// Source of a route parameter.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParamSource {
-    /// Extracted from the URL path (e.g., /items/<item_id>)
-    Path,
-    /// Extracted from the query string
-    Query,
-    /// Extracted from the request body
-    Body,
-}
-
-/// A single route parameter with its source and type.
-#[derive(Debug, Clone)]
-pub struct RouteParam {
-    pub name: String,
-    pub source: ParamSource,
-    pub ty: TypeAnnotation,
-    pub required: bool,
-}
-
-/// Extracted route information from a Flask endpoint.
-#[derive(Debug, Clone)]
-pub struct RouteInfo {
-    pub method: HttpMethod,
-    pub path: String,
-    pub handler: Function,
-    pub params: Vec<RouteParam>,
-}
-
-impl RouteInfo {
-    pub fn new(method: HttpMethod, path: impl Into<String>, handler: Function) -> Self {
-        let path_str: String = path.into();
-        let params = Self::extract_params(&handler, &path_str);
-        Self {
-            method,
-            path: path_str,
-            handler,
-            params,
-        }
-    }
-
-    fn extract_params(handler: &Function, path: &str) -> Vec<RouteParam> {
-        let path_params = extract_path_params(path);
-        let mut params = Vec::new();
-
-        for param in &handler.params {
-            let source = if path_params.contains(&param.name) {
-                ParamSource::Path
-            } else if matches!(param.annotation, TypeAnnotation::Class(_)) {
-                ParamSource::Body
-            } else {
-                ParamSource::Query
-            };
-
-            params.push(RouteParam {
-                name: param.name.clone(),
-                source,
-                ty: param.annotation.clone(),
-                required: param.default.is_none(),
-            });
-        }
-
-        params
-    }
-}
-
-/// Extract path parameter names from a normalized path (using `{param}` syntax).
-fn extract_path_params(path: &str) -> Vec<String> {
-    let mut params = Vec::new();
-    let mut chars = path.chars();
-    while let Some(c) = chars.next() {
-        if c == '{' {
-            let param: String = chars.by_ref().take_while(|&c| c != '}').collect();
-            if !param.is_empty() {
-                params.push(param);
-            }
-        }
-    }
-    params
-}
+use celer_hir::TypeAnnotation;
 
 /// Convert Flask-style path (`<type:param>` or `<param>`) to standard `{param}` format.
 /// Also returns the extracted typed parameters for type inference.
@@ -216,6 +117,7 @@ mod tests {
     #[test]
     fn route_param_extraction() {
         use celer_hir::Parameter;
+        use celer_hir::Function;
 
         let handler = Function {
             name: "get_item".into(),
@@ -255,6 +157,7 @@ mod tests {
     #[test]
     fn body_param_detection() {
         use celer_hir::Parameter;
+        use celer_hir::Function;
 
         let handler = Function {
             name: "create_item".into(),

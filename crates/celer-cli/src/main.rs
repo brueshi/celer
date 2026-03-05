@@ -23,5 +23,6 @@ fn main() -> Result<()> {
         Command::Run(args) => commands::run::execute(&args),
         Command::Bench(args) => commands::bench::execute(&args),
         Command::Serve(args) => commands::serve::execute(&args),
+        Command::Cloud(args) => commands::cloud::execute(&args),
     }
 }

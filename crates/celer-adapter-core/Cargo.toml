@@ -1,0 +1,10 @@
+[package]
+name = "celer-adapter-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Shared types and traits for Celer framework adapters"
+
+[dependencies]
+celer-hir.workspace = true
+thiserror.workspace = true
