@@ -158,6 +158,7 @@ mod tests {
                     ty: TypeAnnotation::Any,
                 },
             ],
+            keywords: vec![],
             ty: TypeAnnotation::Any,
         }
     }

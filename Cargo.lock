@@ -150,6 +150,7 @@ dependencies = [
  "celer-flask",
  "celer-hir",
  "celer-parser",
+ "celer-pyhost",
  "celer-runtime",
  "celer-server",
  "celer-typeinfer",
@@ -241,6 +242,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "celer-pyhost"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pyo3",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "celer-runtime"
 version = "0.1.0"
 dependencies = [
@@ -258,6 +270,7 @@ dependencies = [
  "bytes",
  "celer-fastapi",
  "celer-hir",
+ "celer-pyhost",
  "celer-runtime",
  "http-body-util",
  "hyper",

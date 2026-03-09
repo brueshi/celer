@@ -2,7 +2,7 @@ use num_traits::ToPrimitive;
 use rustpython_parser::ast;
 
 use crate::error::ParseError;
-use celer_hir::{Expression, TypeAnnotation};
+use celer_hir::{Comprehension, Expression, FStringPart, Keyword, TypeAnnotation};
 
 /// Convert a rustpython-parser expression AST node to a HIR Expression.
 pub fn convert_expr(expr: &ast::Expr) -> Result<Expression, ParseError> {
@@ -22,6 +22,10 @@ pub fn convert_expr(expr: &ast::Expr) -> Result<Expression, ParseError> {
         ast::Expr::Compare(cmp) => convert_compare(cmp),
         ast::Expr::BinOp(binop) => convert_binop(binop),
         ast::Expr::UnaryOp(unary) => convert_unaryop(unary),
+        ast::Expr::Await(a) => convert_await(a),
+        ast::Expr::JoinedStr(j) => convert_fstring(j),
+        ast::Expr::ListComp(lc) => convert_list_comp(lc),
+        ast::Expr::DictComp(dc) => convert_dict_comp(dc),
         _ => Err(ParseError::UnsupportedFeature(format!(
             "expression: {expr:?}"
         ))),
@@ -74,10 +78,18 @@ fn convert_dict(dict: &ast::ExprDict) -> Result<Expression, ParseError> {
 fn convert_call(call: &ast::ExprCall) -> Result<Expression, ParseError> {
     let func = convert_expr(&call.func)?;
     let args: Result<Vec<_>, _> = call.args.iter().map(convert_expr).collect();
+    let mut keywords = Vec::new();
+    for kw in &call.keywords {
+        keywords.push(Keyword {
+            name: kw.arg.as_ref().map(|a| a.to_string()),
+            value: convert_expr(&kw.value)?,
+        });
+    }
 
     Ok(Expression::Call {
         func: Box::new(func),
         args: args?,
+        keywords,
         ty: TypeAnnotation::Unknown,
     })
 }
@@ -186,6 +198,79 @@ fn convert_boolop(boolop: &ast::ExprBoolOp) -> Result<Expression, ParseError> {
         };
     }
     Ok(result)
+}
+
+fn convert_await(a: &ast::ExprAwait) -> Result<Expression, ParseError> {
+    let value = convert_expr(&a.value)?;
+    Ok(Expression::Await {
+        value: Box::new(value),
+        ty: TypeAnnotation::Unknown,
+    })
+}
+
+fn convert_fstring(j: &ast::ExprJoinedStr) -> Result<Expression, ParseError> {
+    let mut parts = Vec::new();
+    for value in &j.values {
+        match value {
+            ast::Expr::Constant(c) => {
+                if let ast::Constant::Str(s) = &c.value {
+                    parts.push(FStringPart::Literal(s.clone()));
+                }
+            }
+            ast::Expr::FormattedValue(fv) => {
+                let expr = convert_expr(&fv.value)?;
+                parts.push(FStringPart::Expression(Box::new(expr)));
+            }
+            other => {
+                let expr = convert_expr(other)?;
+                parts.push(FStringPart::Expression(Box::new(expr)));
+            }
+        }
+    }
+    Ok(Expression::FString {
+        parts,
+        ty: TypeAnnotation::Str,
+    })
+}
+
+fn convert_list_comp(lc: &ast::ExprListComp) -> Result<Expression, ParseError> {
+    let element = convert_expr(&lc.elt)?;
+    let generators = convert_comprehensions(&lc.generators)?;
+    Ok(Expression::ListComp {
+        element: Box::new(element),
+        generators,
+        ty: TypeAnnotation::Unknown,
+    })
+}
+
+fn convert_dict_comp(dc: &ast::ExprDictComp) -> Result<Expression, ParseError> {
+    let key = convert_expr(&dc.key)?;
+    let value = convert_expr(&dc.value)?;
+    let generators = convert_comprehensions(&dc.generators)?;
+    Ok(Expression::DictComp {
+        key: Box::new(key),
+        value: Box::new(value),
+        generators,
+        ty: TypeAnnotation::Unknown,
+    })
+}
+
+fn convert_comprehensions(
+    generators: &[ast::Comprehension],
+) -> Result<Vec<Comprehension>, ParseError> {
+    generators
+        .iter()
+        .map(|comp| {
+            let target = convert_expr(&comp.target)?;
+            let iter = convert_expr(&comp.iter)?;
+            let conditions: Result<Vec<_>, _> = comp.ifs.iter().map(convert_expr).collect();
+            Ok(Comprehension {
+                target: Box::new(target),
+                iter: Box::new(iter),
+                conditions: conditions?,
+            })
+        })
+        .collect()
 }
 
 fn convert_compare(cmp: &ast::ExprCompare) -> Result<Expression, ParseError> {

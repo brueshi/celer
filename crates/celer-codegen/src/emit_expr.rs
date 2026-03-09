@@ -12,7 +12,7 @@ use crate::error::CodegenError;
 static BUFFER_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Size of scratch buffers used by str() and string concat.
-const STR_BUF_SIZE: u64 = 256;
+const STR_BUF_SIZE: u64 = 8192;
 
 /// Emit LLVM IR for a scalar expression and return the resulting value.
 /// Dict expressions are not handled here -- they use the JSON emitter path.
@@ -60,6 +60,12 @@ pub fn emit_expression<'ctx>(
         } => emit_binary_op(ctx, op, left, right, ty),
         Expression::UnaryOp { op, operand, ty } => emit_unary_op(ctx, op, operand, ty),
         Expression::Call { func, args, .. } => emit_call(ctx, func, args),
+        Expression::Await { .. }
+        | Expression::FString { .. }
+        | Expression::ListComp { .. }
+        | Expression::DictComp { .. } => Err(CodegenError::UnsupportedExpression(
+            "expression requires Python runtime".into(),
+        )),
         Expression::List { elements, ty } => {
             crate::emit_collection::emit_list(ctx, elements, ty)
         }
@@ -507,6 +513,7 @@ fn emit_builtin_str<'ctx>(
     let buf_global = ctx.module.add_global(buf_ty, None, &buf_name);
     buf_global.set_linkage(inkwell::module::Linkage::Private);
     buf_global.set_initializer(&buf_ty.const_zero());
+    buf_global.set_thread_local_mode(Some(inkwell::ThreadLocalMode::GeneralDynamicTLSModel));
     let buf = buf_global.as_pointer_value();
 
     // Format string: "%lld" for i64
@@ -698,6 +705,7 @@ fn emit_string_concat<'ctx>(
     let buf_global = ctx.module.add_global(buf_ty, None, &buf_name);
     buf_global.set_linkage(inkwell::module::Linkage::Private);
     buf_global.set_initializer(&buf_ty.const_zero());
+    buf_global.set_thread_local_mode(Some(inkwell::ThreadLocalMode::GeneralDynamicTLSModel));
     let buf = buf_global.as_pointer_value();
 
     let fmt = ctx

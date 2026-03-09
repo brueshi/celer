@@ -13,6 +13,7 @@ members = [
     "crates/celer-bench",
     "crates/celer-server",
     "crates/celer-cloud",
+    "crates/celer-pyhost",
 ]
 exclude = ["benches/rust"]
 resolver = "3"
@@ -36,6 +37,7 @@ celer-django = { path = "crates/celer-django" }
 celer-bench = { path = "crates/celer-bench" }
 celer-server = { path = "crates/celer-server" }
 celer-cloud = { path = "crates/celer-cloud" }
+celer-pyhost = { path = "crates/celer-pyhost" }
 
 # External dependencies
 rustpython-parser = "0.4.0"

@@ -3,6 +3,25 @@ use serde::{Deserialize, Serialize};
 use crate::types::TypeAnnotation;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FStringPart {
+    Literal(String),
+    Expression(Box<Expression>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Comprehension {
+    pub target: Box<Expression>,
+    pub iter: Box<Expression>,
+    pub conditions: Vec<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Keyword {
+    pub name: Option<String>,
+    pub value: Expression,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -60,6 +79,7 @@ pub enum Expression {
     Call {
         func: Box<Expression>,
         args: Vec<Expression>,
+        keywords: Vec<Keyword>,
         ty: TypeAnnotation,
     },
     Attribute {
@@ -96,6 +116,25 @@ pub enum Expression {
         body: Box<Expression>,
         ty: TypeAnnotation,
     },
+    Await {
+        value: Box<Expression>,
+        ty: TypeAnnotation,
+    },
+    FString {
+        parts: Vec<FStringPart>,
+        ty: TypeAnnotation,
+    },
+    ListComp {
+        element: Box<Expression>,
+        generators: Vec<Comprehension>,
+        ty: TypeAnnotation,
+    },
+    DictComp {
+        key: Box<Expression>,
+        value: Box<Expression>,
+        generators: Vec<Comprehension>,
+        ty: TypeAnnotation,
+    },
 }
 
 impl Expression {
@@ -117,7 +156,11 @@ impl Expression {
             | Self::Dict { ty, .. }
             | Self::Tuple { ty, .. }
             | Self::IfExpr { ty, .. }
-            | Self::Lambda { ty, .. } => ty,
+            | Self::Lambda { ty, .. }
+            | Self::Await { ty, .. }
+            | Self::FString { ty, .. }
+            | Self::ListComp { ty, .. }
+            | Self::DictComp { ty, .. } => ty,
         }
     }
 }

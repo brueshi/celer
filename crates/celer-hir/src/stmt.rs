@@ -4,6 +4,13 @@ use crate::expr::Expression;
 use crate::func::Function;
 use crate::types::TypeAnnotation;
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExceptHandler {
+    pub exception_type: Option<String>,
+    pub name: Option<String>,
+    pub body: Vec<Statement>,
+}
+
 /// HIR statement node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
@@ -59,5 +66,11 @@ pub enum Statement {
     Assert {
         test: Expression,
         msg: Option<Expression>,
+    },
+    Try {
+        body: Vec<Statement>,
+        handlers: Vec<ExceptHandler>,
+        orelse: Vec<Statement>,
+        finalbody: Vec<Statement>,
     },
 }

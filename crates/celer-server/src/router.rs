@@ -16,6 +16,14 @@ pub enum ParamType {
     Str,
 }
 
+/// Disposition of a matched route: native AOT or ASGI fallback.
+pub enum RouteDisposition<'a> {
+    /// Route is compiled to native code, bypass Python entirely.
+    Native(&'a CompiledRoute),
+    /// Route is not compiled, forward to Python ASGI app.
+    Asgi,
+}
+
 /// Route table matching HTTP requests to compiled handlers.
 pub struct Router {
     routes: Vec<RouteEntry>,
@@ -48,6 +56,21 @@ impl Router {
             segments,
             route,
         });
+    }
+
+    /// Match an incoming request for hybrid routing.
+    ///
+    /// Returns `Native` with route if a compiled handler exists,
+    /// or `Asgi` if the request should be forwarded to Python.
+    pub fn match_hybrid(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> (RouteDisposition<'_>, HashMap<String, String>) {
+        match self.match_route(method, path) {
+            Some((route, params)) => (RouteDisposition::Native(route), params),
+            None => (RouteDisposition::Asgi, HashMap::new()),
+        }
     }
 
     /// Match an incoming request against registered routes.
@@ -233,6 +256,24 @@ mod tests {
 
         assert!(router.match_route("get", "/health").is_some());
         assert!(router.match_route("Get", "/health").is_some());
+    }
+
+    #[test]
+    fn hybrid_native_match() {
+        let mut router = Router::new();
+        router.add_route("GET", "/health", route("health_check", &[]));
+
+        let (disposition, _) = router.match_hybrid("GET", "/health");
+        assert!(matches!(disposition, RouteDisposition::Native(r) if r.handler_name == "health_check"));
+    }
+
+    #[test]
+    fn hybrid_asgi_fallback() {
+        let mut router = Router::new();
+        router.add_route("GET", "/health", route("health_check", &[]));
+
+        let (disposition, _) = router.match_hybrid("POST", "/users");
+        assert!(matches!(disposition, RouteDisposition::Asgi));
     }
 
     #[test]

@@ -1,0 +1,13 @@
+[package]
+name = "celer-pyhost"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Persistent CPython runtime and ASGI dispatcher for hybrid native/Python serving"
+
+[dependencies]
+pyo3.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

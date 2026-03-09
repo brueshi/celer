@@ -43,6 +43,29 @@ pub fn not_found_response() -> Response<Full<Bytes>> {
         .unwrap()
 }
 
+/// Convert an ASGI response into a hyper HTTP response.
+pub fn asgi_response_to_hyper(
+    status: u16,
+    headers: &[(Vec<u8>, Vec<u8>)],
+    body: Bytes,
+) -> Response<Full<Bytes>> {
+    let mut builder = Response::builder().status(status);
+    for (name, value) in headers {
+        if let (Ok(name_str), Ok(value_str)) = (
+            std::str::from_utf8(name),
+            hyper::header::HeaderValue::from_bytes(value),
+        ) {
+            builder = builder.header(name_str, value_str);
+        }
+    }
+    builder.body(Full::new(body)).unwrap_or_else(|_| {
+        Response::builder()
+            .status(500)
+            .body(Full::new(Bytes::from("internal error")))
+            .unwrap()
+    })
+}
+
 /// 500 Internal Server Error response.
 pub fn error_response(msg: &str) -> Response<Full<Bytes>> {
     let body = format!(r#"{{"error":"{}"}}"#, msg.replace('"', "\\\""));

@@ -8,8 +8,8 @@ pub mod types;
 
 pub use class_def::ClassDef;
 pub use error::HirError;
-pub use expr::{BinaryOp, Expression, UnaryOp};
+pub use expr::{BinaryOp, Comprehension, Expression, FStringPart, Keyword, UnaryOp};
 pub use func::{Function, Parameter};
 pub use module::Module;
-pub use stmt::Statement;
+pub use stmt::{ExceptHandler, Statement};
 pub use types::TypeAnnotation;

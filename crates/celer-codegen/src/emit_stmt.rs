@@ -61,6 +61,11 @@ pub fn emit_statement<'ctx>(
         Statement::Expr(_) => {
             // Side-effect expression; ignore result
         }
+        Statement::Try { .. } => {
+            return Err(CodegenError::UnsupportedExpression(
+                "try/except requires Python runtime".into(),
+            ));
+        }
         _ => {}
     }
     Ok(())

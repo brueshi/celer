@@ -88,6 +88,13 @@ impl<'a> CompilabilityAnalyzer<'a> {
         func: &Function,
         known_functions: &HashMap<String, bool>,
     ) -> Compilability {
+        // Async functions cannot be natively compiled
+        if func.is_async {
+            return Compilability::NotCompilable(
+                "async functions require Python runtime".to_string(),
+            );
+        }
+
         let mut issues = Vec::new();
 
         // Check return type is compilable
@@ -198,6 +205,9 @@ impl<'a> CompilabilityAnalyzer<'a> {
             Statement::Import { .. } | Statement::ImportFrom { .. } => {
                 issues.push("import statements not natively compilable".into());
             }
+            Statement::Try { .. } => {
+                issues.push("try/except requires Python runtime".into());
+            }
         }
     }
 
@@ -229,7 +239,7 @@ impl<'a> CompilabilityAnalyzer<'a> {
                 self.check_unary_op_compilable(op, issues);
                 self.check_expression(operand, known_functions, issues);
             }
-            Expression::Call { func, args, .. } => {
+            Expression::Call { func, args, keywords, .. } => {
                 // Check if it's a known compilable function
                 if let Expression::Name { id, .. } = func.as_ref() {
                     const BUILTIN_FUNCTIONS: &[&str] =
@@ -242,6 +252,9 @@ impl<'a> CompilabilityAnalyzer<'a> {
                     }
                 } else {
                     issues.push("indirect function calls not supported".into());
+                }
+                if !keywords.is_empty() {
+                    issues.push("keyword arguments not natively compilable".into());
                 }
                 for arg in args {
                     self.check_expression(arg, known_functions, issues);
@@ -326,6 +339,18 @@ impl<'a> CompilabilityAnalyzer<'a> {
             Expression::Lambda { .. } => {
                 issues.push("lambda expressions not natively compilable".into());
             }
+            Expression::Await { .. } => {
+                issues.push("async/await requires Python runtime".into());
+            }
+            Expression::FString { .. } => {
+                issues.push("f-strings require Python runtime".into());
+            }
+            Expression::ListComp { .. } => {
+                issues.push("list comprehensions require Python runtime".into());
+            }
+            Expression::DictComp { .. } => {
+                issues.push("dict comprehensions require Python runtime".into());
+            }
         }
     }
 
@@ -340,9 +365,10 @@ impl<'a> CompilabilityAnalyzer<'a> {
     fn is_range_call(&self, expr: &Expression) -> bool {
         matches!(
             expr,
-            Expression::Call { func, args, .. }
+            Expression::Call { func, args, keywords, .. }
             if matches!(func.as_ref(), Expression::Name { id, .. } if id == "range")
                 && (args.len() == 1 || args.len() == 2 || args.len() == 3)
+                && keywords.is_empty()
         )
     }
 }
@@ -411,6 +437,7 @@ mod tests {
                         ty: TypeAnnotation::Unknown,
                     }),
                     args: vec![],
+                    keywords: vec![],
                     ty: TypeAnnotation::Unknown,
                 }),
             }],
@@ -585,6 +612,7 @@ mod tests {
                         ty: TypeAnnotation::Unknown,
                     }),
                     args: vec![Expression::IntLiteral(42)],
+                    keywords: vec![],
                     ty: TypeAnnotation::Int,
                 }),
             }],
@@ -620,6 +648,7 @@ mod tests {
                         id: "s".into(),
                         ty: TypeAnnotation::Str,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Int,
                 }),
             }],
@@ -654,6 +683,7 @@ mod tests {
                         id: "x".into(),
                         ty: TypeAnnotation::Int,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Unknown,
                 })],
                 decorators: vec![],

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use hyper::HeaderMap;
+
 use celer_runtime::Value;
 
 use crate::router::ParamType;
@@ -32,6 +34,21 @@ pub fn convert_params(
     }
 
     Ok(args)
+}
+
+/// Extract HTTP headers as byte pairs for ASGI scope.
+///
+/// Header names are lowercased per ASGI spec.
+pub fn extract_headers(headers: &HeaderMap) -> Vec<(Vec<u8>, Vec<u8>)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().as_bytes().to_vec(),
+                value.as_bytes().to_vec(),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

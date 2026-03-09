@@ -8,6 +8,7 @@ description = "Lightweight HTTP server for compiled Celer routes"
 [dependencies]
 celer-hir.workspace = true
 celer-fastapi.workspace = true
+celer-pyhost.workspace = true
 celer-runtime.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true

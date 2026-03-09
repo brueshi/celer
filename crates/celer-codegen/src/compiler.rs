@@ -536,6 +536,7 @@ mod tests {
                             id: "range".into(),
                             ty: TypeAnnotation::Unknown,
                         }),
+                        keywords: vec![],
                         args: vec![Expression::Name {
                             id: "n".into(),
                             ty: TypeAnnotation::Int,
@@ -632,6 +633,7 @@ mod tests {
                         id: "s".into(),
                         ty: TypeAnnotation::Str,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Int,
                 }),
             }],
@@ -671,6 +673,7 @@ mod tests {
                         id: "n".into(),
                         ty: TypeAnnotation::Int,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Str,
                 }),
             }],
@@ -710,6 +713,7 @@ mod tests {
                         id: "s".into(),
                         ty: TypeAnnotation::Str,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Int,
                 }),
             }],
@@ -749,6 +753,7 @@ mod tests {
                         id: "s".into(),
                         ty: TypeAnnotation::Str,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Float,
                 }),
             }],
@@ -788,6 +793,7 @@ mod tests {
                         id: "x".into(),
                         ty: TypeAnnotation::Int,
                     }],
+                    keywords: vec![],
                     ty: TypeAnnotation::Bool,
                 }),
             }],
@@ -934,6 +940,7 @@ mod tests {
                             id: "range".into(),
                             ty: TypeAnnotation::Unknown,
                         }),
+                        keywords: vec![],
                         args: vec![
                             Expression::Name {
                                 id: "start".into(),
@@ -1001,6 +1008,7 @@ mod tests {
                             id: "range".into(),
                             ty: TypeAnnotation::Unknown,
                         }),
+                        keywords: vec![],
                         args: vec![
                             Expression::IntLiteral(0),
                             Expression::Name {

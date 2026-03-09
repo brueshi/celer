@@ -10,7 +10,7 @@ use crate::emit_stmt::emit_statement;
 use crate::error::CodegenError;
 use crate::types::{is_json_return_type, resolve_type};
 
-const SNPRINTF_BUF_SIZE: u64 = 256;
+const SNPRINTF_BUF_SIZE: u64 = 8192;
 
 /// Emit a complete LLVM function from HIR.
 pub fn emit_function<'ctx>(
@@ -259,6 +259,7 @@ fn emit_snprintf_json<'ctx>(
     let buf_global = ctx.module.add_global(buf_ty, None, &buf_name);
     buf_global.set_linkage(inkwell::module::Linkage::Private);
     buf_global.set_initializer(&buf_ty.const_zero());
+    buf_global.set_thread_local_mode(Some(inkwell::ThreadLocalMode::GeneralDynamicTLSModel));
     let buf = buf_global.as_pointer_value();
 
     // Format string global (must be null-terminated for snprintf)

@@ -252,6 +252,30 @@ impl InferenceEngine {
 
                 Ok(())
             }
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                for s in body {
+                    self.infer_statement(s)?;
+                }
+                for handler in handlers {
+                    self.ctx.push_scope();
+                    for s in &mut handler.body {
+                        self.infer_statement(s)?;
+                    }
+                    self.ctx.pop_scope();
+                }
+                for s in orelse {
+                    self.infer_statement(s)?;
+                }
+                for s in finalbody {
+                    self.infer_statement(s)?;
+                }
+                Ok(())
+            }
             // Statements that don't carry type information yet
             Statement::Import { .. }
             | Statement::ImportFrom { .. }
@@ -306,7 +330,7 @@ impl InferenceEngine {
                 *ty = resolved.clone();
                 Ok(resolved)
             }
-            Expression::Call { func, args, ty } => {
+            Expression::Call { func, args, ty, .. } => {
                 if *ty != TypeAnnotation::Unknown {
                     return Ok(ty.clone());
                 }
@@ -410,6 +434,37 @@ impl InferenceEngine {
                 *ty = resolved.clone();
                 Ok(resolved)
             }
+            Expression::Await { value, ty } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let resolved = self.infer_expression(value)?;
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
+            Expression::FString { ty, .. } => {
+                *ty = TypeAnnotation::Str;
+                Ok(TypeAnnotation::Str)
+            }
+            Expression::ListComp { element, ty, .. } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let elem_ty = self.infer_expression(element)?;
+                let resolved = TypeAnnotation::List(Box::new(elem_ty));
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
+            Expression::DictComp { key, value, ty, .. } => {
+                if *ty != TypeAnnotation::Unknown {
+                    return Ok(ty.clone());
+                }
+                let key_ty = self.infer_expression(key)?;
+                let val_ty = self.infer_expression(value)?;
+                let resolved = TypeAnnotation::Dict(Box::new(key_ty), Box::new(val_ty));
+                *ty = resolved.clone();
+                Ok(resolved)
+            }
             _ => Ok(expr.ty().clone()),
         }
     }
@@ -437,9 +492,10 @@ impl InferenceEngine {
     fn is_range_call(expr: &Expression) -> bool {
         matches!(
             expr,
-            Expression::Call { func, args, .. }
+            Expression::Call { func, args, keywords, .. }
             if matches!(func.as_ref(), Expression::Name { id, .. } if id == "range")
                 && (1..=3).contains(&args.len())
+                && keywords.is_empty()
         )
     }
 }
@@ -672,6 +728,7 @@ mod tests {
                     ty: TypeAnnotation::Unknown,
                 }),
                 args: vec![Expression::StringLiteral("world".into())],
+                keywords: vec![],
                 ty: TypeAnnotation::Unknown,
             },
         });
@@ -796,6 +853,7 @@ mod tests {
                     ty: TypeAnnotation::Unknown,
                 }),
                 args: vec![Expression::IntLiteral(1), Expression::IntLiteral(2)],
+                keywords: vec![],
                 ty: TypeAnnotation::Unknown,
             },
         });
@@ -1081,6 +1139,7 @@ mod tests {
                     ty: TypeAnnotation::Unknown,
                 }),
                 args: vec![Expression::StringLiteral("alice".into())],
+                keywords: vec![],
                 ty: TypeAnnotation::Unknown,
             },
         });
@@ -1116,6 +1175,7 @@ mod tests {
                     ty: TypeAnnotation::Unknown,
                 }),
                 args: vec![],
+                keywords: vec![],
                 ty: TypeAnnotation::Unknown,
             },
         });
@@ -1158,6 +1218,7 @@ mod tests {
                     ty: TypeAnnotation::Unknown,
                 }),
                 args: vec![],
+                keywords: vec![],
                 ty: TypeAnnotation::Unknown,
             },
         });

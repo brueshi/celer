@@ -4,7 +4,7 @@ use crate::convert_decorator::decorator_to_string;
 use crate::convert_expr::convert_expr;
 use crate::convert_type::convert_annotation;
 use crate::error::ParseError;
-use celer_hir::{Expression, Function, Parameter, Statement, TypeAnnotation};
+use celer_hir::{ExceptHandler, Expression, Function, Parameter, Statement, TypeAnnotation};
 
 /// Convert a rustpython-parser statement AST node to a HIR Statement.
 pub fn convert_stmt(stmt: &ast::Stmt) -> Result<Statement, ParseError> {
@@ -29,6 +29,7 @@ pub fn convert_stmt(stmt: &ast::Stmt) -> Result<Statement, ParseError> {
         ast::Stmt::AnnAssign(a) => convert_ann_assign(a),
         ast::Stmt::Raise(r) => convert_raise(r),
         ast::Stmt::Assert(a) => convert_assert(a),
+        ast::Stmt::Try(t) => convert_try(t),
         _ => Err(ParseError::UnsupportedFeature(format!(
             "statement: {stmt:?}"
         ))),
@@ -307,6 +308,33 @@ fn convert_raise(r: &ast::StmtRaise) -> Result<Statement, ParseError> {
         None => None,
     };
     Ok(Statement::Raise { value })
+}
+
+fn convert_try(t: &ast::StmtTry) -> Result<Statement, ParseError> {
+    let body: Result<Vec<_>, _> = t.body.iter().map(convert_stmt).collect();
+    let mut handlers = Vec::new();
+    for h in &t.handlers {
+        let ast::ExceptHandler::ExceptHandler(eh) = h;
+        let exception_type = eh.type_.as_ref().and_then(|e| match e.as_ref() {
+            ast::Expr::Name(n) => Some(n.id.to_string()),
+            _ => None,
+        });
+        let name = eh.name.as_ref().map(|n| n.to_string());
+        let handler_body: Result<Vec<_>, _> = eh.body.iter().map(convert_stmt).collect();
+        handlers.push(ExceptHandler {
+            exception_type,
+            name,
+            body: handler_body?,
+        });
+    }
+    let orelse: Result<Vec<_>, _> = t.orelse.iter().map(convert_stmt).collect();
+    let finalbody: Result<Vec<_>, _> = t.finalbody.iter().map(convert_stmt).collect();
+    Ok(Statement::Try {
+        body: body?,
+        handlers,
+        orelse: orelse?,
+        finalbody: finalbody?,
+    })
 }
 
 fn convert_assert(a: &ast::StmtAssert) -> Result<Statement, ParseError> {
